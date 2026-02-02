@@ -6,7 +6,7 @@ from FFN import FFN_REGISTRY
 class MHA_BLOCK(nn.Module): 
     """Transformer block: attention + MLP"""
 
-    def __init__(self, n_embd, n_head, ffn_type: str):
+    def __init__(self, n_embd, n_head, ffn_type: str = 'relu'):
         super().__init__()
         assert n_embd % n_head == 0 
         assert ffn_type in FFN_REGISTRY, f"Unknown FFN type: {ffn_type}"
@@ -31,7 +31,7 @@ class MQA_BLOCK(nn.Module):
     Transformer block with MQA and pluggable FFN
     """
 
-    def __init__(self, n_embd, n_head, ffn_type: str):
+    def __init__(self, n_embd: int, n_head: int, ffn_type: str = 'relu'):
         super().__init__()
         assert n_embd % n_head == 0 
         assert ffn_type in FFN_REGISTRY, f"Unknown FFN type: {ffn_type}"
@@ -49,7 +49,7 @@ class MQA_BLOCK(nn.Module):
 
 
 class GQA_BLOCK(nn.Module):
-    def __init__(self, n_embd, n_head, n_kv_head, ffn_type: str):
+    def __init__(self, n_embd, n_head, n_kv_head, ffn_type: str = 'relu'):
         super().__init__()
 
         self.attn = GroupedQueryAttention(
