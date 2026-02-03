@@ -9,13 +9,19 @@ import gc
 import time
 import math
 import sys
+import json
+import tempfile
 from dataclasses import asdict
+from datetime import datetime
 from typing import Optional, Any, Dict 
 import torch
 from torch import nn
 from torch.optim import AdamW
 from tqdm import tqdm
 from config.train import TrainingConfig
+
+# Supported optimizers for dynamic selection
+SUPPORTED_OPTIMIZERS = frozenset({"adamw", "adam", "sgd", "adafactor"})
 
 
 class Trainer:
@@ -74,6 +80,14 @@ class Trainer:
         self._train_start_time = None
         self._last_step_time = None  
 
+        # Loss tracking for metadata
+        self._best_loss = float("inf")
+        self._worst_loss = float("-inf")
+        self._final_loss = None
+        self._best_loss_step = 0
+        self._total_tokens_trained = 0
+        self._total_training_time = 0.0
+
         # CUDA optimizations
         if self.device.type == "cuda":
             torch.backends.cuda.matmul.allow_tf32 = True
@@ -95,10 +109,11 @@ class Trainer:
     def _log_init_info(self):
         """Log model and memory info at initialization."""
         params = self.parameter_counts()
-        self._log(f"[Trainer] Model: {params['trainable_params']:,} params ({params['trainable_percent']:.1f}% trainable)")
+        self._log(f"[Trainer] Model: {params['trainable_params_m']:.2f}M trainable / {params['total_params_m']:.2f}M total ({params['trainable_percent']:.1f}%)")
+        self._log(f"[Trainer] Optimizer: {self.config.optimizer.upper()} | LR: {self.config.lr:.2e} | Weight Decay: {self.config.weight_decay}")
         if self.device.type == "cuda":
             mem = self.get_memory_summary()
-            self._log(f"[Trainer] GPU Memory: {mem['allocated_gb']:.2f}GB allocated, {mem['peak_gb']:.2f}GB peak")
+            self._log(f"[Trainer] GPU Memory: {mem['allocated_gb']:.2f}GB allocated | Device: {self.device}")
 
     # -------------------------------------------------------------------------
     # VRAM Optimization Helpers
@@ -175,6 +190,15 @@ class Trainer:
     # Initialization helpers 
     # -------------------------------------------------------------------------
     def _create_optimizer(self):
+        """Create optimizer based on config. Supports: adamw, adam, sgd, adafactor."""
+        optimizer_name = getattr(self.config, 'optimizer', 'adamw').lower()
+        
+        if optimizer_name not in SUPPORTED_OPTIMIZERS:
+            raise ValueError(
+                f"Unsupported optimizer: '{self.config.optimizer}'. "
+                f"Supported: {', '.join(sorted(SUPPORTED_OPTIMIZERS))}"
+            )
+        
         # Exclude bias and LayerNorm/Norm weights from weight decay
         decay_params = []
         no_decay_params = []
@@ -185,12 +209,28 @@ class Trainer:
                 no_decay_params.append(param)
             else:
                 decay_params.append(param)
+        
         param_groups = [
             {"params": decay_params, "weight_decay": self.config.weight_decay},
             {"params": no_decay_params, "weight_decay": 0.0},
         ]
-        optimizer = AdamW(param_groups, lr=self.config.lr, betas=self.config.betas, eps=self.config.eps)
-        return optimizer
+        
+        # Create optimizer based on config
+        if optimizer_name == "adamw":
+            return AdamW(param_groups, lr=self.config.lr, betas=self.config.betas, eps=self.config.eps)
+        elif optimizer_name == "adam":
+            return torch.optim.Adam(param_groups, lr=self.config.lr, betas=self.config.betas, eps=self.config.eps)
+        elif optimizer_name == "sgd":
+            return torch.optim.SGD(param_groups, lr=self.config.lr, momentum=0.9)
+        elif optimizer_name == "adafactor":
+            try:
+                from transformers.optimization import Adafactor
+                return Adafactor(param_groups, lr=self.config.lr, relative_step=False, warmup_init=False)
+            except ImportError:
+                raise ImportError(
+                    "Adafactor requires the 'transformers' library. "
+                    "Install with: pip install transformers"
+                )
  
     # -------------------------------------------------------------------------
     # Learning rate schedule 
@@ -220,15 +260,100 @@ class Trainer:
     # Utilities 
     # -------------------------------------------------------------------------
     def parameter_counts(self) -> Dict[str, Any]:
-        total = 0
-        trainable = 0
-        for p in self.model.parameters():
-            n = p.numel()
-            total += n
-            if p.requires_grad:
-                trainable += n
+        """Return parameter counts with human-readable formatting in millions."""
+        total = sum(p.numel() for p in self.model.parameters())
+        trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         pct = (trainable / total * 100.0) if total > 0 else 0.0
-        return {"total_params": total, "trainable_params": trainable, "trainable_percent": pct}
+        return {
+            "total_params": total,
+            "trainable_params": trainable,
+            "trainable_percent": pct,
+            "total_params_m": total / 1e6,
+            "trainable_params_m": trainable / 1e6,
+        }
+
+    # -------------------------------------------------------------------------
+    # Metadata Generation (Production Debug)
+    # -------------------------------------------------------------------------
+    def _generate_training_metadata(self, checkpoint_path: str) -> Dict[str, Any]:
+        """Generate comprehensive training metadata for debugging."""
+        params = self.parameter_counts()
+        mem = self.get_memory_summary()
+        
+        # Calculate avg tokens per second
+        avg_tokens_per_sec = 0.0
+        if self._total_training_time > 0 and self._total_tokens_trained > 0:
+            avg_tokens_per_sec = self._total_tokens_trained / self._total_training_time
+        
+        metadata = {
+            "model_info": {
+                "model_name": self.model.__class__.__name__,
+                "checkpoint_path": checkpoint_path,
+                "save_timestamp": datetime.now().isoformat(),
+            },
+            "training_statistics": {
+                "total_parameters": params["total_params"],
+                "trainable_parameters": params["trainable_params"],
+                "total_trained_tokens": self._total_tokens_trained,
+                "total_training_time_seconds": round(self._total_training_time, 2),
+                "avg_tokens_per_second": round(avg_tokens_per_sec, 2),
+            },
+            "loss_statistics": {
+                "best_loss": self._best_loss if self._best_loss != float("inf") else None,
+                "worst_loss": self._worst_loss if self._worst_loss != float("-inf") else None,
+                "final_loss": self._final_loss,
+                "step_at_best_loss": self._best_loss_step,
+            },
+            "system_diagnostics": {
+                "peak_gpu_memory_allocated_gb": mem.get("peak_gb", 0),
+                "peak_gpu_memory_reserved_gb": mem.get("reserved_gb", 0),
+                "device_type": str(self.device),
+                "num_gpus": torch.cuda.device_count() if self.device.type == "cuda" else 0,
+            },
+            "optimizer_config": {
+                "optimizer_name": getattr(self.config, 'optimizer', 'adamw'),
+                "learning_rate": self.config.lr,
+                "weight_decay": self.config.weight_decay,
+                "gradient_accumulation_steps": self.config.grad_accum_steps,
+                "batch_size": self.config.train_batch_size,
+                "effective_batch_size": self.config.train_batch_size * self.config.grad_accum_steps,
+            },
+        }
+        return metadata
+
+    def _save_metadata_atomically(self, metadata: Dict[str, Any], path: str):
+        """Write metadata atomically (write to temp, then rename)."""
+        dir_path = os.path.dirname(path)
+        os.makedirs(dir_path, exist_ok=True)
+        
+        # Write to temp file first, then atomically rename
+        fd, temp_path = tempfile.mkstemp(suffix='.json', dir=dir_path)
+        try:
+            with os.fdopen(fd, 'w') as f:
+                json.dump(metadata, f, indent=2)
+            os.replace(temp_path, path)
+        except Exception:
+            # Clean up temp file on failure
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            raise
+
+    def _save_checkpoint_metadata(self, checkpoint_path: str, checkpoint_name: str):
+        """Save metadata JSON file alongside checkpoint to src/logs/."""
+        # Determine metadata path in src/logs/
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        logs_dir = os.path.join(os.path.dirname(script_dir), "logs")
+        
+        # Extract checkpoint name without extension and add .json
+        base_name = os.path.splitext(checkpoint_name)[0]
+        metadata_path = os.path.join(logs_dir, f"{base_name}.json")
+        
+        try:
+            metadata = self._generate_training_metadata(checkpoint_path)
+            self._save_metadata_atomically(metadata, metadata_path)
+            self._log(f"[Trainer] Saved metadata: {metadata_path}")
+        except Exception as e:
+            self._log(f"[Trainer] Warning: Failed to save metadata: {e}")
  
     # -------------------------------------------------------------------------
     # Checkpointing 
@@ -254,7 +379,43 @@ class Trainer:
 
         torch.save(payload, path)
         self._log(f"[Trainer] Saved checkpoint: {path}")
+        
+        # Upload to Google Drive if configured (non-blocking on failure)
+        if self.config.upload_to_drive:
+            self._upload_checkpoint_to_drive(path)
+
+        # Upload to GCS if configured (non-blocking on failure)
+        if self.config.upload_to_gcs:
+            self._upload_checkpoint_to_gcs(path)
+        
         return path
+    
+    def _upload_checkpoint_to_drive(self, local_path: str) -> None: 
+        try:
+            from services.cloud_storage import upload_to_gdrive
+            
+            gdrive_path = upload_to_gdrive(
+                local_path=local_path,
+                folder_id=self.config.gdrive_folder_id,
+            )
+            self._log(f"[Trainer] Uploaded to Google Drive: {gdrive_path}")
+        except Exception as e:
+            self._log(f"[Trainer] Warning: Google Drive upload failed: {e}")
+    
+    def _upload_checkpoint_to_gcs(self, local_path: str) -> Optional[str]: 
+        try:
+            from services.cloud_storage import upload_to_gcs
+            
+            gcs_uri = upload_to_gcs(
+                local_path=local_path,
+                bucket_name=self.config.gcs_bucket_name,
+                destination_blob=self.config.gcs_destination_blob,
+            )
+            self._log(f"[Trainer] Uploaded to GCS: {gcs_uri}")
+            return gcs_uri
+        except Exception as e:
+            self._log(f"[Trainer] Warning: GCS upload failed: {e}")
+            return None
 
     def load_checkpoint(self, path: str, map_location: Optional[torch.device] = None) -> Dict[str, Any]:
         if map_location is None:
@@ -468,6 +629,28 @@ class Trainer:
                     # Accumulate loss for averaging
                     running_loss += step_info["loss"]
                     loss_count += 1
+                    
+                    # Track loss statistics for metadata
+                    current_loss = step_info["loss"]
+                    self._final_loss = current_loss
+                    if current_loss < self._best_loss:
+                        self._best_loss = current_loss
+                        self._best_loss_step = self.global_step
+                    if current_loss > self._worst_loss:
+                        self._worst_loss = current_loss
+                    
+                    # Track tokens trained (batch_size * sequence_length)
+                    # Extract from batch since inputs is scoped inside train_step
+                    if isinstance(batch, (list, tuple)):
+                        batch_tensor = batch[0]
+                    elif isinstance(batch, dict):
+                        batch_tensor = batch.get("input_ids") or batch.get("inputs") or batch.get("input")
+                    else:
+                        batch_tensor = batch
+                    if batch_tensor is not None and hasattr(batch_tensor, 'size'):
+                        batch_size = batch_tensor.size(0)
+                        seq_length = batch_tensor.size(1) if batch_tensor.dim() > 1 else self.config.block_size
+                        self._total_tokens_trained += batch_size * seq_length
 
                     if step_info["did_step"]:
                         # Update progress bar
@@ -529,6 +712,7 @@ class Trainer:
             pbar.close()
 
         total_wall = time.perf_counter() - self._train_start_time
+        self._total_training_time = total_wall
         
         # Final summary
         self._log(f"[Trainer] Training complete: {self.global_step} steps in {total_wall:.1f}s ({total_wall/60:.1f}min)")
@@ -536,10 +720,13 @@ class Trainer:
             mem = self.get_memory_summary()
             self._log(f"[Trainer] Peak GPU memory: {mem['peak_gb']:.2f}GB")
         
-        # Final checkpoint
+        # Final checkpoint with metadata
         if self.ckpt_dir:
             try:
-                self.save_checkpoint(step=self.global_step, prefix="final_ckpt")
+                ckpt_name = f"final_ckpt_step_{self.global_step:07d}.pt"
+                ckpt_path = self.save_checkpoint(step=self.global_step, prefix="final_ckpt")
+                # Generate and save metadata for final checkpoint
+                self._save_checkpoint_metadata(ckpt_path, ckpt_name)
             except Exception as e:
                 self._log(f"[Trainer] Warning: Final checkpoint save failed: {e}")
  

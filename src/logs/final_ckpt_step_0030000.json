@@ -1,0 +1,34 @@
+{
+  "model_info": {
+    "model_name": "DecodeTransformer",
+    "checkpoint_path": "./checkpoints/final_ckpt_step_0030000.pt",
+    "save_timestamp": "2026-02-02T18:53:20.385326"
+  },
+  "training_statistics": {
+    "total_parameters": 28611025,
+    "trainable_parameters": 28611025,
+    "total_trained_tokens": 245760000,
+    "total_training_time_seconds": 7642.16,
+    "avg_tokens_per_second": 32158.43
+  },
+  "loss_statistics": {
+    "best_loss": 1.5368704795837402,
+    "worst_loss": 3.7178893089294434,
+    "final_loss": 1.8458740711212158,
+    "step_at_best_loss": 27473
+  },
+  "system_diagnostics": {
+    "peak_gpu_memory_allocated_gb": 3.354,
+    "peak_gpu_memory_reserved_gb": 0.402,
+    "device_type": "cuda",
+    "num_gpus": 1
+  },
+  "optimizer_config": {
+    "optimizer_name": "adamw",
+    "learning_rate": 0.0005,
+    "weight_decay": 0.1,
+    "gradient_accumulation_steps": 4,
+    "batch_size": 16,
+    "effective_batch_size": 64
+  }
+}

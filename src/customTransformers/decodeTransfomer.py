@@ -5,14 +5,14 @@ from customTransformers.blocks import MQA_BLOCK
 
 class DecodeTransformer(nn.Module):
 
-    def __init__(self, num_layers, n_emb, n_head, vocab_size, block_size , dropout=0.1):
+    def __init__(self, num_layers, n_emb, n_head, vocab_size, block_size , dropout=0.1, ffn_type=None):
         super().__init__() 
 
         self.token_emb = nn.Embedding(vocab_size, n_emb)
         self.position_emb = nn.Embedding(block_size, n_emb)
         self.drop = nn.Dropout(dropout)
         self.transformer_blocks = nn.ModuleList([
-            MQA_BLOCK(n_embd=n_emb, n_head=n_head)
+            MQA_BLOCK(n_embd=n_emb, n_head=n_head, ffn_type=ffn_type)
             for _ in range(num_layers)
         ])
 

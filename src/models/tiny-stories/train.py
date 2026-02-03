@@ -89,6 +89,12 @@ val_loader = DataLoader(
 )
 
 
+RESUME_FROM_CHECKPOINT = True
+RESUME_CKPT_PATH = os.path.join(
+    cfg.ckpt_dir,
+    "ckpt_step_0015000.pt"
+) 
+
 # Model
 # =============================================================================
 model = DecodeTransformer(
@@ -109,6 +115,20 @@ trainer = Trainer(
     tokenizer=tokenizer,
     ckpt_dir=cfg.ckpt_dir,
 ) 
+
+# =============================================================================
+# Resume training (if enabled)
+# =============================================================================
+if RESUME_FROM_CHECKPOINT:
+    if not os.path.isfile(RESUME_CKPT_PATH):
+        raise FileNotFoundError(
+            f"Checkpoint not found: {RESUME_CKPT_PATH}"
+        )
+
+    log.info(f"Resuming training from checkpoint: {RESUME_CKPT_PATH}")
+    trainer.load_checkpoint(RESUME_CKPT_PATH)
+    log.info(f"Resumed at global_step = {trainer.global_step}")
+
 
 log.info(f"Model: {trainer.parameter_counts()}")
 
