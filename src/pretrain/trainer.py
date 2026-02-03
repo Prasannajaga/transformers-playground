@@ -20,12 +20,11 @@ from torch.optim import AdamW
 from tqdm import tqdm
 from config.train import TrainingConfig
 
-# Supported optimizers for dynamic selection
 SUPPORTED_OPTIMIZERS = frozenset({"adamw", "adam", "sgd", "adafactor"})
+LOGS_DIR = "src/logs"
 
 
 class Trainer:
-    """Production-grade trainer with tqdm progress bars and clean logging."""
 
     def __init__(
         self,
@@ -51,9 +50,7 @@ class Trainer:
         self.use_amp = bool(self.config.use_amp and self.device.type == "cuda")
         self.amp_dtype = self._resolve_amp_dtype()
         self.scaler = torch.amp.GradScaler(enabled=self.use_amp)
-        
-        # Gradient checkpointing for memory efficiency
-        # self._setup_gradient_checkpointing()
+
 
         # Optimizer with parameter groups (no weight decay on bias & LayerNorm)
         self.optimizer = self._create_optimizer()
@@ -81,10 +78,13 @@ class Trainer:
         self._last_step_time = None  
 
         # Loss tracking for metadata
-        self._best_loss = float("inf")
-        self._worst_loss = float("-inf")
-        self._final_loss = None
-        self._best_loss_step = 0
+        self._best_train_loss = float("inf")
+        self._worst_train_loss = float("-inf")
+        self._final_train_loss = None
+        self._best_train_loss_step = 0
+        self._best_val_loss = float("inf")
+        self._final_val_loss = None
+        self._best_val_loss_step = 0
         self._total_tokens_trained = 0
         self._total_training_time = 0.0
 
@@ -98,16 +98,11 @@ class Trainer:
         if self.config.enable_logging:
             self._log_init_info()
 
-    # -------------------------------------------------------------------------
-    # Logging Helpers (Clean, non-repetitive)
-    # -------------------------------------------------------------------------
     def _log(self, message: str):
-        """Simple log output to stderr to not interfere with tqdm."""
         if self.config.enable_logging:
             tqdm.write(message, file=sys.stderr)
     
     def _log_init_info(self):
-        """Log model and memory info at initialization."""
         params = self.parameter_counts()
         self._log(f"[Trainer] Model: {params['trainable_params_m']:.2f}M trainable / {params['total_params_m']:.2f}M total ({params['trainable_percent']:.1f}%)")
         self._log(f"[Trainer] Optimizer: {self.config.optimizer.upper()} | LR: {self.config.lr:.2e} | Weight Decay: {self.config.weight_decay}")
@@ -115,11 +110,7 @@ class Trainer:
             mem = self.get_memory_summary()
             self._log(f"[Trainer] GPU Memory: {mem['allocated_gb']:.2f}GB allocated | Device: {self.device}")
 
-    # -------------------------------------------------------------------------
-    # VRAM Optimization Helpers
-    # -------------------------------------------------------------------------
     def _resolve_amp_dtype(self) -> torch.dtype:
-        """Resolve AMP dtype from config string to torch dtype."""
         dtype_map = {
             "float16": torch.float16,
             "fp16": torch.float16,
@@ -142,43 +133,35 @@ class Trainer:
         return requested_dtype
     
     def _setup_gradient_checkpointing(self):
-        """Enable gradient checkpointing on the model if supported."""
         if not self.config.enable_gradient_checkpointing:
             return
-        
         if hasattr(self.model, "gradient_checkpointing_enable"):
             self.model.gradient_checkpointing_enable()
             self._log("[Trainer] Enabled gradient checkpointing")
             return
-        
         checkpointed_count = 0
         for module in self.model.modules():
             if hasattr(module, "use_checkpoint"):
                 module.use_checkpoint = True
                 checkpointed_count += 1
-        
         if checkpointed_count > 0:
             self._log(f"[Trainer] Enabled gradient checkpointing on {checkpointed_count} modules")
         else:
             self._log("[Trainer] Warning: Gradient checkpointing not supported by model")
     
     def _clear_cuda_cache(self):
-        """Clear CUDA cache to reduce memory fragmentation."""
         if self.device.type != "cuda":
             return
         gc.collect()
         torch.cuda.empty_cache()
     
     def reset_peak_memory_stats(self):
-        """Reset peak memory tracking for fresh measurement."""
         if self.device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(self.device)
     
     def get_memory_summary(self) -> Dict[str, float]:
-        """Get current memory usage summary in GB."""
         if self.device.type != "cuda":
             return {"device": "cpu", "allocated_gb": 0, "reserved_gb": 0, "peak_gb": 0}
-        
         return {
             "device": str(self.device),
             "allocated_gb": round(torch.cuda.memory_allocated(self.device) / (1024 ** 3), 3),
@@ -186,11 +169,7 @@ class Trainer:
             "peak_gb": round(torch.cuda.max_memory_allocated(self.device) / (1024 ** 3), 3),
         }
 
-    # -------------------------------------------------------------------------
-    # Initialization helpers 
-    # -------------------------------------------------------------------------
     def _create_optimizer(self):
-        """Create optimizer based on config. Supports: adamw, adam, sgd, adafactor."""
         optimizer_name = getattr(self.config, 'optimizer', 'adamw').lower()
         
         if optimizer_name not in SUPPORTED_OPTIMIZERS:
@@ -232,9 +211,7 @@ class Trainer:
                     "Install with: pip install transformers"
                 )
  
-    # -------------------------------------------------------------------------
-    # Learning rate schedule 
-    # -------------------------------------------------------------------------
+
     def _get_lr_factor(self, step: int) -> float: 
         if self.total_steps is None or self.total_steps <= 0:
             if self.warmup_steps > 0:
@@ -256,11 +233,7 @@ class Trainer:
         for base, group in zip(self._base_lrs, self.optimizer.param_groups):
             group["lr"] = base * factor
  
-    # -------------------------------------------------------------------------
-    # Utilities 
-    # -------------------------------------------------------------------------
     def parameter_counts(self) -> Dict[str, Any]:
-        """Return parameter counts with human-readable formatting in millions."""
         total = sum(p.numel() for p in self.model.parameters())
         trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         pct = (trainable / total * 100.0) if total > 0 else 0.0
@@ -272,92 +245,114 @@ class Trainer:
             "trainable_params_m": trainable / 1e6,
         }
 
-    # -------------------------------------------------------------------------
-    # Metadata Generation (Production Debug)
-    # -------------------------------------------------------------------------
+    def _track_step_metadata(self, loss: float, batch):
+        self._final_train_loss = loss
+        if loss < self._best_train_loss:
+            self._best_train_loss = loss
+            self._best_train_loss_step = self.global_step
+        if loss > self._worst_train_loss:
+            self._worst_train_loss = loss
+        if isinstance(batch, (list, tuple)):
+            batch_tensor = batch[0]
+        elif isinstance(batch, dict):
+            batch_tensor = batch.get("input_ids") or batch.get("inputs") or batch.get("input")
+        else:
+            batch_tensor = batch
+        if batch_tensor is not None and hasattr(batch_tensor, 'size'):
+            batch_size = batch_tensor.size(0)
+            seq_length = batch_tensor.size(1) if batch_tensor.dim() > 1 else self.config.block_size
+            self._total_tokens_trained += batch_size * seq_length
+
+    def _build_progress_postfix(
+        self,
+        avg_loss: float,
+        lr: float,
+        grad_norm: Optional[float] = None,
+        val_loss: Optional[float] = None,
+    ) -> Dict[str, str]:
+        postfix = {
+            "train_loss": f"{avg_loss:.4f}",
+            "lr": f"{lr:.2e}",
+        }
+        if grad_norm is not None:
+            postfix["gnorm"] = f"{grad_norm:.2f}"
+        if val_loss is not None:
+            postfix["val"] = f"{val_loss:.4f}"
+        if self.config.log_memory_usage and self.device.type == "cuda":
+            mem = self.get_memory_summary()
+            postfix["mem"] = f"{mem['allocated_gb']:.1f}GB"
+        return postfix
+
     def _generate_training_metadata(self, checkpoint_path: str) -> Dict[str, Any]:
-        """Generate comprehensive training metadata for debugging."""
         params = self.parameter_counts()
         mem = self.get_memory_summary()
-        
-        # Calculate avg tokens per second
         avg_tokens_per_sec = 0.0
         if self._total_training_time > 0 and self._total_tokens_trained > 0:
             avg_tokens_per_sec = self._total_tokens_trained / self._total_training_time
-        
-        metadata = {
-            "model_info": {
-                "model_name": self.model.__class__.__name__,
+
+        return {
+            "model": {
+                "name": self.model.__class__.__name__,
                 "checkpoint_path": checkpoint_path,
-                "save_timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now().isoformat(),
+                "total_params": params["total_params"],
+                "trainable_params": params["trainable_params"],
             },
-            "training_statistics": {
-                "total_parameters": params["total_params"],
-                "trainable_parameters": params["trainable_params"],
-                "total_trained_tokens": self._total_tokens_trained,
-                "total_training_time_seconds": round(self._total_training_time, 2),
-                "avg_tokens_per_second": round(avg_tokens_per_sec, 2),
+            "training": {
+                "total_steps": self.global_step,
+                "tokens_trained": self._total_tokens_trained,
+                "time_seconds": round(self._total_training_time, 2),
+                "tokens_per_second": round(avg_tokens_per_sec, 2),
             },
-            "loss_statistics": {
-                "best_loss": self._best_loss if self._best_loss != float("inf") else None,
-                "worst_loss": self._worst_loss if self._worst_loss != float("-inf") else None,
-                "final_loss": self._final_loss,
-                "step_at_best_loss": self._best_loss_step,
+            "train_loss": {
+                "best": self._best_train_loss if self._best_train_loss != float("inf") else None,
+                "worst": self._worst_train_loss if self._worst_train_loss != float("-inf") else None,
+                "final": self._final_train_loss,
+                "best_step": self._best_train_loss_step,
             },
-            "system_diagnostics": {
-                "peak_gpu_memory_allocated_gb": mem.get("peak_gb", 0),
-                "peak_gpu_memory_reserved_gb": mem.get("reserved_gb", 0),
-                "device_type": str(self.device),
-                "num_gpus": torch.cuda.device_count() if self.device.type == "cuda" else 0,
+            "val_loss": {
+                "best": self._best_val_loss if self._best_val_loss != float("inf") else None,
+                "final": self._final_val_loss,
+                "best_step": self._best_val_loss_step,
             },
-            "optimizer_config": {
-                "optimizer_name": getattr(self.config, 'optimizer', 'adamw'),
-                "learning_rate": self.config.lr,
+            "system": {
+                "device": str(self.device),
+                "gpu_count": torch.cuda.device_count() if self.device.type == "cuda" else 0,
+                "peak_memory_gb": mem.get("peak_gb", 0),
+            },
+            "optimizer": {
+                "name": getattr(self.config, 'optimizer', 'adamw'),
+                "lr": self.config.lr,
                 "weight_decay": self.config.weight_decay,
-                "gradient_accumulation_steps": self.config.grad_accum_steps,
+                "grad_accum_steps": self.config.grad_accum_steps,
                 "batch_size": self.config.train_batch_size,
                 "effective_batch_size": self.config.train_batch_size * self.config.grad_accum_steps,
             },
         }
-        return metadata
 
     def _save_metadata_atomically(self, metadata: Dict[str, Any], path: str):
-        """Write metadata atomically (write to temp, then rename)."""
         dir_path = os.path.dirname(path)
         os.makedirs(dir_path, exist_ok=True)
-        
-        # Write to temp file first, then atomically rename
         fd, temp_path = tempfile.mkstemp(suffix='.json', dir=dir_path)
         try:
             with os.fdopen(fd, 'w') as f:
                 json.dump(metadata, f, indent=2)
             os.replace(temp_path, path)
         except Exception:
-            # Clean up temp file on failure
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
             raise
 
     def _save_checkpoint_metadata(self, checkpoint_path: str, checkpoint_name: str):
-        """Save metadata JSON file alongside checkpoint to src/logs/."""
-        # Determine metadata path in src/logs/
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        logs_dir = os.path.join(os.path.dirname(script_dir), "logs")
-        
-        # Extract checkpoint name without extension and add .json
         base_name = os.path.splitext(checkpoint_name)[0]
-        metadata_path = os.path.join(logs_dir, f"{base_name}.json")
-        
+        metadata_path = os.path.join(LOGS_DIR, f"{base_name}.json")
         try:
             metadata = self._generate_training_metadata(checkpoint_path)
             self._save_metadata_atomically(metadata, metadata_path)
             self._log(f"[Trainer] Saved metadata: {metadata_path}")
         except Exception as e:
             self._log(f"[Trainer] Warning: Failed to save metadata: {e}")
- 
-    # -------------------------------------------------------------------------
-    # Checkpointing 
-    # -------------------------------------------------------------------------
+  
     def save_checkpoint(self, step: Optional[int] = None, prefix: str = "ckpt") -> str:
         step = self.global_step if step is None else int(step)
         if not self.ckpt_dir:
@@ -369,6 +364,16 @@ class Trainer:
             "training_step": step,
             "config": asdict(self.config),
         }
+
+        # for now commenting this 
+        # if self.tokenizer is not None:
+        #     tokenizer_dir = os.path.join(self.ckpt_dir, f"{prefix}_step_{step:07d}_tokenizer")
+        #     try:
+        #         self.tokenizer.save_pretrained(tokenizer_dir)
+        #         payload["tokenizer_path"] = tokenizer_dir
+        #     except Exception as e:
+        #         self._log(f"[Trainer] Warning: Failed to save tokenizer: {e}")
+
         if self.config.save_optimizer_state:
             payload["optimizer_state_dict"] = self.optimizer.state_dict()
         if self.scaler is not None:
@@ -376,18 +381,12 @@ class Trainer:
                 payload["scaler_state_dict"] = self.scaler.state_dict()
             except Exception:
                 payload["scaler_state_dict"] = None
-
         torch.save(payload, path)
         self._log(f"[Trainer] Saved checkpoint: {path}")
-        
-        # Upload to Google Drive if configured (non-blocking on failure)
         if self.config.upload_to_drive:
             self._upload_checkpoint_to_drive(path)
-
-        # Upload to GCS if configured (non-blocking on failure)
         if self.config.upload_to_gcs:
             self._upload_checkpoint_to_gcs(path)
-        
         return path
     
     def _upload_checkpoint_to_drive(self, local_path: str) -> None: 
@@ -441,10 +440,8 @@ class Trainer:
         self.model.to(self.device)
         self._log(f"[Trainer] Loaded checkpoint from {path} (step {self.global_step})")
         return data
- 
-    # -------------------------------------------------------------------------
-    # Validation loss estimation  
-    # -------------------------------------------------------------------------
+  
+    # Validation loss estimation   
     def estimate_validation_loss(self, val_dataloader, num_batches: Optional[int] = None) -> float: 
         """Memory-efficient validation loss estimation."""
         self.model.eval()
@@ -471,10 +468,8 @@ class Trainer:
         self._clear_cuda_cache()
         self.model.train()
         return (total_loss / max(1, seen)).item()
-
-    # -------------------------------------------------------------------------
-    # Core training primitives 
-    # -------------------------------------------------------------------------
+ 
+    # Core training primitives  
     def _unpack_batch(self, batch):
         """Standardize dataloader batch -> (inputs, targets)."""
         if isinstance(batch, (list, tuple)):
@@ -563,10 +558,8 @@ class Trainer:
             "grad_norm": grad_norm,
             "lr": current_lr,
         }
- 
-    # -------------------------------------------------------------------------
-    # Training loop with tqdm
-    # -------------------------------------------------------------------------
+  
+    # Training loop with tqdm 
     def train(
         self,
         train_dataloader,
@@ -629,46 +622,18 @@ class Trainer:
                     # Accumulate loss for averaging
                     running_loss += step_info["loss"]
                     loss_count += 1
-                    
-                    # Track loss statistics for metadata
-                    current_loss = step_info["loss"]
-                    self._final_loss = current_loss
-                    if current_loss < self._best_loss:
-                        self._best_loss = current_loss
-                        self._best_loss_step = self.global_step
-                    if current_loss > self._worst_loss:
-                        self._worst_loss = current_loss
-                    
-                    # Track tokens trained (batch_size * sequence_length)
-                    # Extract from batch since inputs is scoped inside train_step
-                    if isinstance(batch, (list, tuple)):
-                        batch_tensor = batch[0]
-                    elif isinstance(batch, dict):
-                        batch_tensor = batch.get("input_ids") or batch.get("inputs") or batch.get("input")
-                    else:
-                        batch_tensor = batch
-                    if batch_tensor is not None and hasattr(batch_tensor, 'size'):
-                        batch_size = batch_tensor.size(0)
-                        seq_length = batch_tensor.size(1) if batch_tensor.dim() > 1 else self.config.block_size
-                        self._total_tokens_trained += batch_size * seq_length
+
+                    self._track_step_metadata(step_info["loss"], batch)
 
                     if step_info["did_step"]:
-                        # Update progress bar
                         avg_loss = running_loss / loss_count
-                        
-                        # Build postfix dict
-                        postfix = {
-                            "train_loss": f"{avg_loss:.4f}",
-                            "lr": f"{step_info['lr']:.2e}",
-                        }
-                        if step_info["grad_norm"] is not None:
-                            postfix["gnorm"] = f"{step_info['grad_norm']:.2f}"
-                        if last_val_loss is not None:
-                            postfix["val"] = f"{last_val_loss:.4f}"
-                        if self.config.log_memory_usage and self.device.type == "cuda":
-                            mem = self.get_memory_summary()
-                            postfix["mem"] = f"{mem['allocated_gb']:.1f}GB"
-                        
+
+                        postfix = self._build_progress_postfix(
+                            avg_loss=avg_loss,
+                            lr=step_info["lr"],
+                            grad_norm=step_info["grad_norm"],
+                            val_loss=last_val_loss,
+                        )
                         pbar.set_postfix(postfix)
                         pbar.update(1)
                         
@@ -685,7 +650,6 @@ class Trainer:
                                 except Exception as e:
                                     self._log(f"[Trainer] Warning: Checkpoint save failed: {e}")
 
-                        # Validation
                         if val_dataloader is not None and self.config.validation_batch_count:
                             if self.global_step % max(1, self.config.log_interval_steps) == 0:
                                 try:
@@ -693,6 +657,10 @@ class Trainer:
                                         val_dataloader, 
                                         num_batches=self.config.validation_batch_count
                                     )
+                                    self._final_val_loss = last_val_loss
+                                    if last_val_loss < self._best_val_loss:
+                                        self._best_val_loss = last_val_loss
+                                        self._best_val_loss_step = self.global_step
                                     self._log(f"[Trainer] Step {self.global_step}: val_loss={last_val_loss:.4f}")
                                 except Exception as e:
                                     self._log(f"[Trainer] Warning: Validation failed: {e}")
@@ -720,19 +688,20 @@ class Trainer:
             mem = self.get_memory_summary()
             self._log(f"[Trainer] Peak GPU memory: {mem['peak_gb']:.2f}GB")
         
-        # Final checkpoint with metadata
-        if self.ckpt_dir:
+        # Final checkpoint with metadata (skip if already saved at interval)
+        already_saved = (
+            self.config.ckpt_interval_steps
+            and self.global_step % int(self.config.ckpt_interval_steps) == 0
+        )
+        if self.ckpt_dir and not already_saved:
             try:
                 ckpt_name = f"final_ckpt_step_{self.global_step:07d}.pt"
                 ckpt_path = self.save_checkpoint(step=self.global_step, prefix="final_ckpt")
-                # Generate and save metadata for final checkpoint
                 self._save_checkpoint_metadata(ckpt_path, ckpt_name)
             except Exception as e:
                 self._log(f"[Trainer] Warning: Final checkpoint save failed: {e}")
  
-    # -------------------------------------------------------------------------
-    # State dict for manual save/load
-    # -------------------------------------------------------------------------
+
     def state_dict(self) -> Dict[str, Any]: 
         state = {
             "model_state_dict": self.model.state_dict(),

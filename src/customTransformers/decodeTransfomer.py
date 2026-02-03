@@ -1,18 +1,21 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F 
-from customTransformers.blocks import MQA_BLOCK
+from customTransformers.blocks import MQA_BLOCK, MHA_BLOCK
 
 class DecodeTransformer(nn.Module):
 
-    def __init__(self, num_layers, n_emb, n_head, vocab_size, block_size , dropout=0.1, ffn_type=None):
+    def __init__(self, num_layers, n_emb, n_head, vocab_size, block_size , dropout=0.1, attention="MHA",ffn_type='relu'):
         super().__init__() 
 
         self.token_emb = nn.Embedding(vocab_size, n_emb)
         self.position_emb = nn.Embedding(block_size, n_emb)
         self.drop = nn.Dropout(dropout)
+        self.attention = attention 
         self.transformer_blocks = nn.ModuleList([
-            MQA_BLOCK(n_embd=n_emb, n_head=n_head, ffn_type=ffn_type)
+            MHA_BLOCK(n_embd=n_emb, n_head=n_head, ffn_type=ffn_type)
+            if self.attention == "MHA"
+            else MQA_BLOCK(n_embd=n_emb, n_head=n_head, ffn_type=ffn_type) 
             for _ in range(num_layers)
         ])
 

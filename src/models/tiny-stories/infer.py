@@ -24,7 +24,8 @@ model = DecodeTransformer(
     n_head=train_cfg.n_head,
     vocab_size=tokenizer.vocab_size,
     block_size=train_cfg.block_size,
-    ffn_type="swiglu"
+    ffn_type="swiglu",
+    attention="MHA"
 ).to(device)
 
 fileName = f"ckpt_step_{sys.argv[1]}.pt"

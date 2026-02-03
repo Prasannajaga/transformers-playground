@@ -89,7 +89,7 @@ val_loader = DataLoader(
 )
 
 
-RESUME_FROM_CHECKPOINT = True
+RESUME_FROM_CHECKPOINT = False
 RESUME_CKPT_PATH = os.path.join(
     cfg.ckpt_dir,
     "ckpt_step_0015000.pt"
