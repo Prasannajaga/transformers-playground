@@ -21,8 +21,7 @@ from tqdm import tqdm
 from config.train import TrainingConfig
 
 SUPPORTED_OPTIMIZERS = frozenset({"adamw", "adam", "sgd", "adafactor"})
-LOGS_DIR = "src/logs"
-
+LOGS_DIR = "src/logs" 
 
 class Trainer:
 
@@ -357,22 +356,36 @@ class Trainer:
         step = self.global_step if step is None else int(step)
         if not self.ckpt_dir:
             raise ValueError("Checkpoint directory not configured.")
-        fname = f"{prefix}_step_{step:07d}.pt"
-        path = os.path.join(self.ckpt_dir, fname)
+        
+        # Create prefix subdirectory: ckpt_dir/prefix/
+        prefix_dir = os.path.join(self.ckpt_dir, prefix)
+        os.makedirs(prefix_dir, exist_ok=True)
+        
+        # Save config.json once (only if it doesn't exist)
+        config_path = os.path.join(prefix_dir, "config.json")
+        if not os.path.exists(config_path):
+            config_data = asdict(self.config)
+            with open(config_path, "w") as f:
+                json.dump(config_data, f, indent=2)
+            self._log(f"[Trainer] Saved config: {config_path}")
+        
+        # Save checkpoint: prefix/prefix_{step}.pt
+        fname = f"{prefix}_{step}.pt"
+        path = os.path.join(prefix_dir, fname)
         payload = {
             "model_state_dict": self.model.state_dict(),
             "training_step": step,
-            "config": asdict(self.config),
         }
 
-        # for now commenting this 
-        # if self.tokenizer is not None:
-        #     tokenizer_dir = os.path.join(self.ckpt_dir, f"{prefix}_step_{step:07d}_tokenizer")
-        #     try:
-        #         self.tokenizer.save_pretrained(tokenizer_dir)
-        #         payload["tokenizer_path"] = tokenizer_dir
-        #     except Exception as e:
-        #         self._log(f"[Trainer] Warning: Failed to save tokenizer: {e}")
+        # Save tokenizer once (only if directory doesn't exist)
+        if self.tokenizer is not None:
+            tokenizer_dir = os.path.join(prefix_dir, "tokenizer")
+            if not os.path.exists(tokenizer_dir):
+                try:
+                    self.tokenizer.save_pretrained(tokenizer_dir)
+                    self._log(f"[Trainer] Saved tokenizer: {tokenizer_dir}")
+                except Exception as e:
+                    self._log(f"[Trainer] Warning: Failed to save tokenizer: {e}")
 
         if self.config.save_optimizer_state:
             payload["optimizer_state_dict"] = self.optimizer.state_dict()
