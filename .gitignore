@@ -1,3 +1,4 @@
 __pycache__/
 transformers_playground.egg-info
 checkpoints/
+.env
