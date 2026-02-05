@@ -15,6 +15,7 @@ class TrainingConfig:
     n_embd: int = 384
     n_head: int = 6
     block_size: int = 256
+ 
     
     # Data
     train_batch_size: int = 16
@@ -67,7 +68,7 @@ class TrainingConfig:
 
     # Runtime
     use_amp: bool = True
-    amp_dtype: str = "bfloat16"   # or "float16"
+    amp_dtype: str = "float16"   # or "float16"
 
     stop_on_eos: bool = True
 
@@ -85,9 +86,9 @@ class DeployConfig:
     BUCKET_NAME = 'gs://transformer-garage' 
     LOCATION     = 'us-central1'
     COTNAINER_URI = 'us-docker.pkg.dev/vertex-ai/training/pytorch-gpu.2-4.py310:latest'
-    REQUIREMEMTS = ["pandas", "scikit-learn"]
+    REQUIREMEMTS = ["datasets", "transformers", "tqdm"]
     NAME = "model-training-job"
-    SCRIPT_PATH = "src/test_script.py" 
+    SCRIPT_PATH = "pre_training.py" 
     REPLICA_COUNT = 1
     ACCELERATOR_COUNT = 1 
     MACHINE_TYPE = "g2-standard-4"

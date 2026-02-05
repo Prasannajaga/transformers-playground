@@ -3,7 +3,7 @@ import torch
 from transformers import GPT2Tokenizer
 from config import TrainingConfig 
 from customTransformers import DecodeTransformer
-from infer import InferenceEngine
+from pretrain import InferenceEngine
 import os
 import sys
 
@@ -24,11 +24,12 @@ model = DecodeTransformer(
     n_head=train_cfg.n_head,
     vocab_size=tokenizer.vocab_size,
     block_size=train_cfg.block_size,
-    ffn_type="swiglu",
-    attention="MHA"
+    ffn_type="relu",
+    attention="MQA"
 ).to(device)
 
-fileName = f"ckpt_step_{sys.argv[1]}.pt"
+fileName = "ckpt_step_0030000.pt" # f"ckpt_step_{sys.argv[1]}.pt"
+
 print("fileName" , fileName)
 
 # Load checkpoint
@@ -50,7 +51,8 @@ if not os.path.isfile(RESUME_CKPT_PATH):
         f"Checkpoint not found: {RESUME_CKPT_PATH}"
     ) 
 
-infer.load_checkpoint(RESUME_CKPT_PATH) 
+infer.load_checkpoint(RESUME_CKPT_PATH)  
+
 
 # CLI
 while True:

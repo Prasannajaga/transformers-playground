@@ -135,8 +135,8 @@ log.info(f"Model: {trainer.parameter_counts()}")
  
 # Train
 # =============================================================================
-trainer.train(
-    train_dataloader=train_loader,
-    val_dataloader=val_loader,
-    epochs=1,  # ignored if total_steps reached
-)
+# trainer.train(
+#     train_dataloader=train_loader,
+#     val_dataloader=val_loader,
+#     epochs=1,  # ignored if total_steps reached
+# )

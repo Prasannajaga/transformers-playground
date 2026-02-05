@@ -2008,6 +2008,7 @@ source = { editable = "." }
 dependencies = [
     { name = "datasets" },
     { name = "google-cloud-aiplatform" },
+    { name = "google-cloud-storage" },
     { name = "torch" },
     { name = "transformers" },
 ]
@@ -2016,6 +2017,7 @@ dependencies = [
 requires-dist = [
     { name = "datasets" },
     { name = "google-cloud-aiplatform", specifier = ">=1.135.0" },
+    { name = "google-cloud-storage", specifier = ">=2.14.0" },
     { name = "torch" },
     { name = "transformers", specifier = ">=4.57.6" },
 ]

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Production-grade HuggingFace Hub deployment wrapper.
 
@@ -19,9 +18,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import torch
-from huggingface_hub import HfApi, login
+from huggingface_hub import HfApi, hf_hub_download, login
+from safetensors.torch import load_file as load_safetensors
 from safetensors.torch import save_file as save_safetensors
 from transformers import AutoTokenizer, PretrainedConfig
+from templates.model_card import ModelCardTemplate, generate_model_card
 
 logging.basicConfig(
     level=logging.INFO,
@@ -111,8 +112,14 @@ def load_checkpoint(model_path: str, device: str = "cpu") -> Dict[str, Any]:
         state_dict = checkpoint
 
     embedded_config = checkpoint.get("config", {})
+    training_metadata = checkpoint.get("metadata", {})
+    
     logger.info(f"Loaded checkpoint with {len(state_dict)} parameters")
-    return {"state_dict": state_dict, "embedded_config": embedded_config}
+    return {
+        "state_dict": state_dict, 
+        "embedded_config": embedded_config,
+        "metadata": training_metadata,
+    }
 
 
 def create_hf_config(training_config: Dict[str, Any], vocab_size: int) -> CustomModelConfig:
@@ -161,7 +168,6 @@ def save_model_safetensors(state_dict: Dict[str, torch.Tensor], output_dir: Path
             ptr = v.data_ptr()
             if ptr in seen_ptrs:
                 shared_keys.add(k)
-                logger.info(f"Detected shared tensor: {k} -> {seen_ptrs[ptr]}")
             else:
                 seen_ptrs[ptr] = k
 
@@ -178,42 +184,107 @@ def save_model_safetensors(state_dict: Dict[str, torch.Tensor], output_dir: Path
     return output_path
 
 
-def generate_model_card(repo_id: str, config: CustomModelConfig) -> str:
-    return f"""---
-language: en
-license: mit
-tags:
-  - pytorch
-  - causal-lm
-  - custom-architecture
----
+def create_model_card(
+    repo_id: str, 
+    hf_config: CustomModelConfig,
+    training_metadata: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Create a comprehensive model card using the template system."""
+    metadata = training_metadata or {}
+    
+    template = ModelCardTemplate(
+        repo_id=repo_id,
+        num_layers=hf_config.num_layers,
+        hidden_size=hf_config.n_embd,
+        num_attention_heads=hf_config.n_head,
+        vocab_size=hf_config.vocab_size,
+        max_sequence_length=hf_config.block_size,
+        attention_type=hf_config.attention,
+        ffn_type=hf_config.ffn_type,
+        dropout=hf_config.dropout,
+        training_steps=metadata.get("total_steps"),
+        training_dataset=metadata.get("dataset"),
+        training_loss=metadata.get("final_train_loss"),
+        validation_loss=metadata.get("final_val_loss"),
+        config_hash=hf_config.original_config_hash,
+    )
+    
+    return generate_model_card(template)
 
-# {repo_id.split('/')[-1]}
 
-Custom PyTorch language model deployed via `hf_deploy.py`.
-
-## Model Details
-
-| Parameter | Value |
-|-----------|-------|
-| Layers | {config.num_layers} |
-| Hidden Size | {config.n_embd} |
-| Attention Heads | {config.n_head} |
-| Vocab Size | {config.vocab_size} |
-| Max Sequence Length | {config.block_size} |
-
-## Usage
-
-```python
-from transformers import AutoTokenizer
-import torch
-
-tokenizer = AutoTokenizer.from_pretrained("{repo_id}")
-# Load model weights manually or use your custom loader
-```
-
-## Config Hash: `{config.original_config_hash}`
-"""
+# def test_inference(repo_id: str, prompt: str = "Once upon a time") -> None:
+#     """
+#     Pull model from HuggingFace Hub and generate text.
+    
+#     Downloads config, tokenizer and model weights, reconstructs model, and generates.
+#     """
+#     from config import TrainingConfig
+#     from customTransformers import DecodeTransformer
+#     from pretrain import InferenceEngine
+    
+#     device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+#     logger.info("=" * 60)
+#     logger.info("POST-DEPLOYMENT INFERENCE TEST")
+#     logger.info("=" * 60)
+    
+#     # Download config from HuggingFace
+#     logger.info(f"Downloading config from: {repo_id}")
+#     config_path = hf_hub_download(repo_id=repo_id, filename="config.json")
+#     with open(config_path, "r") as f:
+#         hf_config = json.load(f)
+    
+#     # Download tokenizer from HuggingFace
+#     logger.info(f"Downloading tokenizer from: {repo_id}")
+#     tokenizer = AutoTokenizer.from_pretrained(repo_id)
+    
+#     # Download model weights
+#     logger.info(f"Downloading model weights from: {repo_id}")
+#     weights_path = hf_hub_download(repo_id=repo_id, filename="model.safetensors")
+#     state_dict = load_safetensors(weights_path)
+    
+#     # Reconstruct model from config
+#     logger.info("Reconstructing model architecture...")
+#     model = DecodeTransformer(
+#         num_layers=hf_config.get("num_layers", 6),
+#         n_emb=hf_config.get("n_embd", 384),
+#         n_head=hf_config.get("n_head", 6),
+#         vocab_size=hf_config.get("vocab_size", tokenizer.vocab_size),
+#         block_size=hf_config.get("block_size", 256),
+#         ffn_type=hf_config.get("ffn_type", "swiglu"),
+#         attention=hf_config.get("attention", "MQA"),
+#     ).to(device)
+    
+#     # Load weights
+#     model.load_state_dict(state_dict, strict=True)
+#     num_params = sum(p.numel() for p in model.parameters())
+#     logger.info(f"Loaded model with {num_params:,} parameters")
+    
+#     # Create inference engine
+#     train_cfg = TrainingConfig(
+#         block_size=hf_config.get("block_size", 256),
+#         max_new_tokens=100,
+#         temperature=0.7,
+#         use_top_k=True,
+#         top_k=50,
+#     )
+    
+#     engine = InferenceEngine(
+#         model=model,
+#         config=train_cfg,
+#         device=device,
+#         tokenizer=tokenizer,
+#     )
+    
+#     # Generate text
+#     logger.info(f"Prompt: '{prompt}'")
+#     input_ids = tokenizer(prompt, return_tensors="pt").input_ids
+    
+#     print(f"\n{'='*60}")
+#     print(f"RESPONSE: ", end="", flush=True)
+#     for token in engine.stream_generate(input_ids):
+#         print(token, end="", flush=True)
+#     print(f"\n{'='*60}\n")
 
 
 def deploy_to_hub(
@@ -224,7 +295,9 @@ def deploy_to_hub(
     revision: str = "main",
     private: bool = False,
     token: Optional[str] = None,
+    run_inference: bool = True,
 ) -> str:
+    """Deploy a trained model to HuggingFace Hub."""
     hf_token = token or os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     if not hf_token:
         try:
@@ -252,6 +325,7 @@ def deploy_to_hub(
     logger.info("=" * 60)
     checkpoint_data = load_checkpoint(model_path)
     state_dict = checkpoint_data["state_dict"]
+    training_metadata = checkpoint_data.get("metadata", {})
 
     if checkpoint_data["embedded_config"]:
         training_config = {**checkpoint_data["embedded_config"], **training_config}
@@ -282,7 +356,12 @@ def deploy_to_hub(
         logger.info(f"Saved tokenizer to: {output_dir}")
 
         readme_path = output_dir / "README.md"
-        readme_path.write_text(generate_model_card(repo_id, hf_config))
+        readme_content = create_model_card(
+            repo_id=repo_id,
+            hf_config=hf_config,
+            training_metadata=training_metadata,
+        )
+        readme_path.write_text(readme_content)
         logger.info("Generated README.md")
 
         logger.info("=" * 60)
@@ -310,6 +389,10 @@ def deploy_to_hub(
     logger.info("DEPLOYMENT COMPLETE")
     logger.info(f"Model URL: {repo_url}")
     logger.info("=" * 60)
+    
+    # if run_inference:
+    #     prompt = input("\n PROMPT >")
+    #     test_inference(repo_id=repo_id, prompt=prompt)
     return repo_url
 
 
@@ -319,16 +402,16 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
         Example usage:
-          python scripts/hf_deploy.py \
-            --model_path ./checkpoints/ckpt_step_0015000.pt \
-            --config_path ./checkpoints/config.json \
+          python scripts/hf_deploy.py \\
+            --model_path ./checkpoints/ckpt_step_0015000.pt \\
+            --config_path ./checkpoints/config.json \\
             --repo_id prasanna/custom-gpt-mini
 
-          python scripts/hf_deploy.py \
-            --model_path ./checkpoints/run_0042 \
-            --config_path ./checkpoints/run_0042/config.json \
-            --repo_id prasanna/custom-gpt-mini \
-            --tokenizer_path ./tokenizer \
+          python scripts/hf_deploy.py \\
+            --model_path ./checkpoints/run_0042 \\
+            --config_path ./checkpoints/run_0042/config.json \\
+            --repo_id prasanna/custom-gpt-mini \\
+            --tokenizer_path ./tokenizer \\
             --private
         """
     )
@@ -339,7 +422,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--revision", type=str, default="main", help="Branch or tag name")
     parser.add_argument("--private", action="store_true", help="Create private repo")
     parser.add_argument("--token", type=str, default=None, help="HuggingFace API token")
+    parser.add_argument("--no-inference", dest="run_inference", action="store_false",
+                        help="Skip post-deployment inference test")
+    parser.set_defaults(run_inference=True)
     return parser.parse_args()
+
 
 def main():
     args = parse_args()
@@ -352,6 +439,7 @@ def main():
             revision=args.revision,
             private=args.private,
             token=args.token,
+            run_inference=args.run_inference,
         )
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")

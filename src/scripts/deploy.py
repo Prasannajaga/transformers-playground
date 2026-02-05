@@ -1,12 +1,10 @@
-from google.cloud import aiplatform 
-from google.cloud.aiplatform.gapic import AcceleratorType 
+from google.cloud import aiplatform  
 import os 
 from config.train import DeployConfig
 
 config = DeployConfig()
 SERVICE_ACCOUNT= os.getenv("SERVICE_ACCOUNT") 
 PROJECT_ID = os.getenv("PROJECT_ID")
-
 
 # 1. Initialize the SDK
 aiplatform.init(
@@ -21,6 +19,7 @@ job = aiplatform.CustomTrainingJob(
     script_path=config.SCRIPT_PATH,                  
     container_uri=config.COTNAINER_URI, 
     requirements=config.REQUIREMEMTS,    
+    
     # staging_bucket=config.BUCKET_NAME
 )
 
