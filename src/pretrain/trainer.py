@@ -18,7 +18,7 @@ import torch
 from torch import nn
 from torch.optim import AdamW
 from tqdm import tqdm
-from config.train import TrainingConfig
+from config.config import TrainingConfig
 
 SUPPORTED_OPTIMIZERS = frozenset({"adamw", "adam", "sgd", "adafactor"})
 LOGS_DIR = "src/logs" 
@@ -396,38 +396,7 @@ class Trainer:
                 payload["scaler_state_dict"] = None
         torch.save(payload, path)
         self._log(f"[Trainer] Saved checkpoint: {path}")
-        if self.config.upload_to_drive:
-            self._upload_checkpoint_to_drive(path)
-        if self.config.upload_to_gcs:
-            self._upload_checkpoint_to_gcs(path)
-        return path
-    
-    def _upload_checkpoint_to_drive(self, local_path: str) -> None: 
-        try:
-            from services.cloud_storage import upload_to_gdrive
-            
-            gdrive_path = upload_to_gdrive(
-                local_path=local_path,
-                folder_id=self.config.gdrive_folder_id,
-            )
-            self._log(f"[Trainer] Uploaded to Google Drive: {gdrive_path}")
-        except Exception as e:
-            self._log(f"[Trainer] Warning: Google Drive upload failed: {e}")
-    
-    def _upload_checkpoint_to_gcs(self, local_path: str) -> Optional[str]: 
-        try:
-            from services.cloud_storage import upload_to_gcs
-            
-            gcs_uri = upload_to_gcs(
-                local_path=local_path,
-                bucket_name=self.config.gcs_bucket_name,
-                destination_blob=self.config.gcs_destination_blob,
-            )
-            self._log(f"[Trainer] Uploaded to GCS: {gcs_uri}")
-            return gcs_uri
-        except Exception as e:
-            self._log(f"[Trainer] Warning: GCS upload failed: {e}")
-            return None
+        return path 
 
     def load_checkpoint(self, path: str, map_location: Optional[torch.device] = None) -> Dict[str, Any]:
         if map_location is None:

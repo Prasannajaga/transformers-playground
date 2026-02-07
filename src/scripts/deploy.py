@@ -1,6 +1,6 @@
 from google.cloud import aiplatform  
 import os 
-from config.train import DeployConfig
+from config.config import DeployConfig
 
 config = DeployConfig()
 SERVICE_ACCOUNT= os.getenv("SERVICE_ACCOUNT") 

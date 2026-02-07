@@ -107,17 +107,11 @@ class InferenceEngine:
         data = torch.load(path, map_location=self.device)
         self.model.load_state_dict(data["model_state_dict"], strict=True)
         if "config" in data and data["config"]:
-            from config.train import TrainingConfig
+            from config.config import TrainingConfig
             self.cfg = TrainingConfig(**data["config"])
             self.autocast_dtype = (
                 torch.bfloat16
                 if self.cfg.amp_dtype == "bfloat16"
                 else torch.float16
             )
-        # if "tokenizer_path" in data and data["tokenizer_path"]:
-        #     try:
-        #         from transformers import AutoTokenizer
-        #         self.tokenizer = AutoTokenizer.from_pretrained(data["tokenizer_path"])
-        #     except Exception:
-        #         pass
         return data
