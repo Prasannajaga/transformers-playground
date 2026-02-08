@@ -24,7 +24,7 @@ log = logging.getLogger("SFT model training")
 
 log.info("\n\n\n Fine-Tuning SFT Initialization")
 log.info("=" * 50)  
-config = FineTuneConfig()
+config = FineTuneConfig(max_iters=500)
 log.info(f"Config loaded: device={config.device}, mixed_precision={config.mixed_precision}")
 log.info(f"Hyperparams: iters={config.max_iters}, lr={config.max_lr}, batch={config.batch_size}")
 
