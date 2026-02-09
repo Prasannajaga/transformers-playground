@@ -4,3 +4,8 @@ checkpoints/
 .env
 finetuned/
 src/CustomDatasets/ 
+src/models/my-model/Prasanna-SmolLM-135M/
+src/models/my-model/Prasanna-Qwen-0.5B-v1/
+src/models/my-model/*.gguf
+src/models/my-model/outputs/    
+src/models/my-model/Prasanna-Llama-1B-v1/
