@@ -15,3 +15,4 @@ src/models/my-model/Prasanna-Llama-1B-v1/
 unsloth_compiled_cache/
 qwen-7b-full/
 outputs/
+*.cpp
