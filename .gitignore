@@ -9,3 +9,9 @@ src/models/my-model/Prasanna-Qwen-0.5B-v1/
 src/models/my-model/*.gguf
 src/models/my-model/outputs/    
 src/models/my-model/Prasanna-Llama-1B-v1/
+*.pdf
+*.txt
+*.json 
+unsloth_compiled_cache/
+qwen-7b-full/
+outputs/

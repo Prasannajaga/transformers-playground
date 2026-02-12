@@ -28,6 +28,7 @@ dependencies = [
     "accelerate",
     "bitsandbytes>=0.49.1",
     "unsloth>=2026.1.4",
+    "pypdf>=6.7.0",
 ]
 
 [project.urls]
