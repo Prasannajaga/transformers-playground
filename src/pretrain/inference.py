@@ -1,7 +1,10 @@
 from config import TrainingConfig
+import threading
+from typing import Optional, Any
+
 import torch
 import torch.nn as nn
-from typing import Optional, Any 
+from transformers import TextIteratorStreamer
 
 class InferenceEngine:
     def __init__(
@@ -23,6 +26,35 @@ class InferenceEngine:
             if self.cfg.amp_dtype == "bfloat16"
             else torch.float16
         )
+
+    def _build_generation_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {"max_new_tokens": self.cfg.max_new_tokens}
+        if self.cfg.temperature is not None:
+            kwargs["temperature"] = self.cfg.temperature
+        if self.cfg.use_top_k:
+            kwargs["top_k"] = self.cfg.top_k
+        if self.cfg.use_repetition_penalty:
+            kwargs["repetition_penalty"] = self.cfg.repetition_penalty
+        kwargs["do_sample"] = self.cfg.temperature is not None and self.cfg.temperature > 0
+        if self.cfg.stop_on_eos and self.tokenizer is not None:
+            if self.tokenizer.eos_token_id is not None:
+                kwargs["eos_token_id"] = self.tokenizer.eos_token_id
+        if self.tokenizer is not None and self.tokenizer.pad_token_id is not None:
+            kwargs["pad_token_id"] = self.tokenizer.pad_token_id
+        return kwargs
+
+    def _prepare_chat_inputs(self, messages: list[dict]) -> dict[str, torch.Tensor]:
+        if self.tokenizer is None:
+            raise ValueError("Tokenizer is required for chat inference")
+        inputs = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_tensors="pt",
+        )
+        if isinstance(inputs, torch.Tensor):
+            inputs = {"input_ids": inputs}
+        return {key: value.to(self.device) for key, value in inputs.items()}
  
     # Internal sampling logic (shared) 
     def _sample_next_token(self, logits, idx):
@@ -101,6 +133,40 @@ class InferenceEngine:
             idx = torch.cat([idx, next_token], dim=1)
 
         return self.tokenizer.decode(idx[0], skip_special_tokens=True)
+
+    def infer_chat(self, messages: list[dict], streamText: bool = False):
+        model_inputs = self._prepare_chat_inputs(messages)
+        if streamText:
+            return self._stream_chat(model_inputs)
+        if hasattr(self.model, "generate"):
+            with torch.no_grad():
+                output = self.model.generate(**model_inputs, **self._build_generation_kwargs())
+            return self.tokenizer.decode(output[0], skip_special_tokens=True)
+        return self.generate(model_inputs["input_ids"])
+
+    def _stream_chat(self, model_inputs: dict[str, torch.Tensor]):
+        if hasattr(self.model, "generate"):
+            streamer = TextIteratorStreamer(
+                self.tokenizer,
+                skip_prompt=True,
+                skip_special_tokens=True,
+            )
+            kwargs = self._build_generation_kwargs()
+            kwargs["streamer"] = streamer
+            thread = threading.Thread(
+                target=self.model.generate,
+                kwargs={**model_inputs, **kwargs},
+                daemon=True,
+            )
+            thread.start()
+            try:
+                for token in streamer:
+                    yield token
+            finally:
+                thread.join()
+        else:
+            for token in self.stream_generate(model_inputs["input_ids"]):
+                yield token
 
     @torch.no_grad()
     def load_checkpoint(self, path: str):

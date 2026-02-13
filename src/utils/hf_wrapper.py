@@ -5,6 +5,7 @@ import threading
 
 import torch
 from huggingface_hub import snapshot_download
+from datasets import load_dataset
 from transformers import (
     AutoModel,
     AutoModelForCausalLM,
@@ -286,6 +287,46 @@ class HFWrapper:
             if not save_path.exists():
                 cls.save_pretrained(model=model, tokenizer=tokenizer, save_dir=save_path)
         return model, tokenizer
+
+    @classmethod
+    def loadDataset(
+        cls,
+        *,
+        data_file: str | Path,
+        tokenizer: Any,
+        max_seq_length: int,
+        split: str = "train",
+        num_proc: int = 2,
+        messages_field: str = "messages",
+        add_generation_prompt: bool = False,
+    ):
+        dataset = load_dataset("json", data_files=str(data_file), split=split)
+
+        def format_chat(examples: dict[str, Any]) -> dict[str, list[str]]:
+            conversations = examples[messages_field]
+            texts = [
+                tokenizer.apply_chat_template(
+                    convo,
+                    tokenize=False,
+                    add_generation_prompt=add_generation_prompt,
+                )
+                for convo in conversations
+            ]
+            return {"text": texts}
+
+        dataset = dataset.map(format_chat, batched=True, num_proc=num_proc)
+        dataset = dataset.map(
+            lambda x: tokenizer(
+                x["text"],
+                truncation=True,
+                max_length=max_seq_length,
+                padding=False,
+            ),
+            batched=True,
+            num_proc=num_proc,
+            remove_columns=dataset.column_names,
+        )
+        return dataset
 
     @classmethod
     def generate(
