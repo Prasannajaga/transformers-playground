@@ -138,19 +138,31 @@ Prasanna is a software engineer with over 3 years of experience specializing in 
 
 ## Optimization
 
-waht is LORA adapter ?
+## What is LORA adapter?
 
-Low rank adaption which help us avoid overtraining the whole weights 
-in pretrained model
+Low-rank adaptation helps us avoid retraining all the weights in a pretrained model. In simple terms,
+we fine-tune 30% linear weights on data and then merge with original model
 
-say d = 4096, 
-we define rank & alpha 
+Say `d = 4096`, we define `rank` and `alpha`.
 
-first we freeze the model then we initialize all Linear weights based on d x rank 
+First, we freeze the model, then we initialize all Linear weights based on `d × rank`:
 
-* A = matrix^d * rank , B = matrix^rank * d
-* then we scale by alpha / rank 
+- `A = matrix(d × rank)`, `B = matrix(rank × d)`
+- Then we scale by `alpha / rank`
 
-
+```python
 self.lora_A = nn.Linear(base.in_features, r, bias=False, device=device, dtype=dtype)
 self.lora_B = nn.Linear(r, base.out_features, bias=False, device=device, dtype=dtype)
+```
+
+## What is QLORA adapter?
+
+QLoRA is basically a quantized model + LoRA to reduce VRAM usage. During the forward pass alone, we dequantize the model to FP16 or FP32 that's the only difference.
+
+```python
+def forward(self, x: torch.Tensor) -> torch.Tensor:
+    base_weight = self._dequant_weight(x.dtype)
+    bias = None if self.bias is None else self.bias.to(dtype=x.dtype)
+    base = F.linear(x, base_weight, bias)
+    return base + self.lora_B(self.lora_A(self.dropout(x))) * self.scaling
+```
