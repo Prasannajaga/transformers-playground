@@ -21,8 +21,6 @@ from transformers import (
 
 
 class HFWrapper:
-    _model_cache: dict[str, Any] = {}
-    _tokenizer_cache: dict[str, Any] = {}
     _task_to_model_class = {
         "auto": AutoModel,
         "causal-lm": AutoModelForCausalLM,
@@ -31,14 +29,6 @@ class HFWrapper:
         "token-classification": AutoModelForTokenClassification,
         "question-answering": AutoModelForQuestionAnswering,
     }
-
-    @classmethod
-    def _cache_key(cls, *parts: Any) -> str:
-        return "::".join(str(part) for part in parts)
-
-    @classmethod
-    def _normalized_kwargs_repr(cls, kwargs: dict[str, Any]) -> tuple[tuple[str, str], ...]:
-        return tuple(sorted((key, repr(value)) for key, value in kwargs.items()))
 
     @classmethod
     def _normalize_task(cls, task: str) -> str:
@@ -53,12 +43,12 @@ class HFWrapper:
         return cls._task_to_model_class[normalized_task]
 
     @classmethod
-    def _normalize_dtype(cls, torch_dtype: str | torch.dtype | None) -> str | torch.dtype | None:
-        if torch_dtype is None:
+    def _normalize_dtype(cls, dtype: str | torch.dtype | None) -> str | torch.dtype | None:
+        if dtype is None:
             return None
-        if isinstance(torch_dtype, torch.dtype):
-            return torch_dtype
-        normalized = torch_dtype.strip().lower()
+        if isinstance(dtype, torch.dtype):
+            return dtype
+        normalized = dtype.strip().lower()
         if normalized == "auto":
             return "auto"
         mapping = {
@@ -70,11 +60,12 @@ class HFWrapper:
             "fp32": torch.float32,
         }
         if normalized not in mapping:
-            raise ValueError(f"Unsupported torch_dtype '{torch_dtype}'")
+            raise ValueError(f"Unsupported dtype '{dtype}'")
         return mapping[normalized]
 
     @classmethod
     def build_quantization_config(
+        cls,
         quantization: str | None = None,
         **kwargs: Any,
     ) -> BitsAndBytesConfig | None:
@@ -98,6 +89,7 @@ class HFWrapper:
 
     @classmethod
     def pull_model(
+        cls,
         model_name: str,
         local_dir: str | Path | None = None,
         *,
@@ -123,9 +115,9 @@ class HFWrapper:
 
     @classmethod
     def resolve_source(
+        cls,
         name: str,
-        local_dir: str | Path | None = None,
-        *,
+        local_dir: str | Path | None = None, 
         prefer_local: bool = True,
     ) -> str:
         if local_dir is None:
@@ -151,16 +143,6 @@ class HFWrapper:
     ):
         source_name = tokenizer_name or model_name
         source = cls.resolve_source(source_name, local_dir, prefer_local=prefer_local)
-        cache_key = cls._cache_key(
-            "tokenizer",
-            source,
-            use_fast,
-            trust_remote_code,
-            local_files_only,
-            cls._normalized_kwargs_repr(kwargs),
-        )
-        if not force_reload and cache_key in cls._tokenizer_cache:
-            return cls._tokenizer_cache[cache_key]
 
         tokenizer_kwargs = dict(kwargs)
         if use_fast is not None:
@@ -170,8 +152,6 @@ class HFWrapper:
         tokenizer = AutoTokenizer.from_pretrained(source, **tokenizer_kwargs)
         if tokenizer.pad_token is None and tokenizer.eos_token is not None:
             tokenizer.pad_token = tokenizer.eos_token
-
-        cls._tokenizer_cache[cache_key] = tokenizer
         return tokenizer
 
     @classmethod
@@ -185,7 +165,7 @@ class HFWrapper:
         quantization: str | None = None,
         quantization_kwargs: dict[str, Any] | None = None,
         device_map: str | dict[str, int] | None = "auto",
-        torch_dtype: str | torch.dtype | None = "auto",
+        dtype: str | torch.dtype | None = "auto",
         trust_remote_code: bool = False,
         local_files_only: bool = False,
         use_safetensors: bool | None = None,
@@ -197,43 +177,34 @@ class HFWrapper:
         quant_config = None
         if quantization is not None and not cls._has_local_quant_config(source):
             quant_config = cls.build_quantization_config(quantization, **(quantization_kwargs or {}))
-        dtype = cls._normalize_dtype(torch_dtype)
 
         model_kwargs = dict(kwargs)
+        legacy_dtype = model_kwargs.pop("torch_dtype", None)
+        resolved_dtype_input = dtype
+        if legacy_dtype is not None and (
+            resolved_dtype_input is None
+            or (isinstance(resolved_dtype_input, str) and resolved_dtype_input.strip().lower() == "auto")
+        ):
+            resolved_dtype_input = legacy_dtype
+        resolved_dtype = cls._normalize_dtype(resolved_dtype_input)
         if device_map is not None:
             model_kwargs["device_map"] = device_map
         model_kwargs["trust_remote_code"] = trust_remote_code
         model_kwargs["local_files_only"] = local_files_only
         if use_safetensors is not None:
             model_kwargs["use_safetensors"] = use_safetensors
-        if dtype is not None:
-            model_kwargs["torch_dtype"] = dtype
+        if resolved_dtype is not None:
+            model_kwargs["dtype"] = resolved_dtype
         if quant_config is not None:
             model_kwargs["quantization_config"] = quant_config
 
-        cache_key = cls._cache_key(
-            "model",
-            source,
-            cls._normalize_task(task),
-            quantization,
-            repr(quantization_kwargs),
-            repr(device_map),
-            repr(dtype),
-            trust_remote_code,
-            local_files_only,
-            use_safetensors,
-            cls._normalized_kwargs_repr(kwargs),
-        )
-        if not force_reload and cache_key in cls._model_cache:
-            return cls._model_cache[cache_key]
-
         model = model_class.from_pretrained(source, **model_kwargs)
         model.eval()
-        cls._model_cache[cache_key] = model
         return model
 
     @classmethod
     def save_pretrained(
+        cls,
         *,
         model: Any,
         tokenizer: Any | None,
@@ -329,7 +300,42 @@ class HFWrapper:
         return dataset
 
     @classmethod
+    def get_tokenizer(cls, **kwargs: Any):
+        return cls.load_tokenizer(**kwargs)
+
+    @classmethod
+    def get_model(cls, **kwargs: Any):
+        return cls.load_model(**kwargs)
+
+    @classmethod
+    def get_model_and_tokenizer(cls, **kwargs: Any):
+        return cls.load_model_and_tokenizer(**kwargs)
+
+    @classmethod
+    def get_dataset(
+        cls,
+        *,
+        data_file: str | Path,
+        tokenizer: Any,
+        max_seq_length: int,
+        split: str = "train",
+        num_proc: int = 2,
+        messages_field: str = "messages",
+        add_generation_prompt: bool = False,
+    ):
+        return cls.loadDataset(
+            data_file=data_file,
+            tokenizer=tokenizer,
+            max_seq_length=max_seq_length,
+            split=split,
+            num_proc=num_proc,
+            messages_field=messages_field,
+            add_generation_prompt=add_generation_prompt,
+        )
+
+    @classmethod
     def generate(
+        cls,
         *,
         model: Any,
         tokenizer: Any,

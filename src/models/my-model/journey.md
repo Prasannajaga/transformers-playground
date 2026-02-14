@@ -1,130 +1,3 @@
-<!-- I have started think okay it's about time I pre-train or fine tune model from scratch about me, my journey, my story and my life
-well I think it's about time
-
-I was strongly to pretrain from scratch then I remember and read paper couple weeks back from hugging face smoll-Llm blog <https://huggingface.co/blog/smollm> which boldy says don't waste compute for training from scratch
-
-I was like okay let me try to fine-tune a model from scratch
-choosing model to fine tune was pretty hard to me
-
-## my goal is clear
-
-I have to create chatbout about me and deploy it in my portfolio
-so I have some constraints
-
-1. model should infer smoothly on CPU
-2. modeul should be less than 300MB
-3. model should be small enough to fit in 4GB/ 8GB RAM
-4. model should be quantanized and able infer using llama.cpp
-5. deploy cotainer cloud RUN cost effective (and I got GCP credits)
-6. freeze the base model use unsloth for fine-tuning LORA adapters
-
-## choosing model
-
-I was very confused about which model to choose
-i choosed isntruct model because it not only pre-trained on massive dataset but also fine-tuned on instruction following dataset
-
-I have 3 options
-
-1. llama-3.1-8b-instruct
-2. qwen2.5-0.5b-instruct
-3. smoll-vllm-135M/360M-instruct
-
-## llama-3.1-8b-instruct
-
-I always wanted to work with llama so I choosed this as my first fine-tuning project
-
-I have to say it was SOTA model with 1B instruct model
-I can able to reach better accuracy with just few samples but the model was sized 800MB even after 4-bit quantization,
-deploying this on CLOUD function would be expensize considering I
-have to load model on every request or each cold start
-
-it was hard trade off droping llama because of the infra, it was 95% accuracy with just 10 samples
-
-2.47 GB to 800MB compression
-100% better accuracy
-
-## qwen2.5-0.5b-instruct
-
-this is 500M model, it was 1GB even after 4-bit quantization
-I was like okay let me try to fine-tune this
-I can able to reach 75% accuracy with just 10 samples since it is trained on les token comapred to llama
-
-compression
-1GB to 390MB  4bit
-60% lower accuracy compared to llama
-
-## smoll-vllm-135M / 360M
-
-Finally the small sized and my requirement model
-
-135M model
-compression 270MB to 144MB 8bit  
-I can able to reach 40% accuracy but the tradeoff was worth it
-
-360M model
-compression 725MB  to 350MB 8bit  
-I can able to reach 60% accuracy but the tradeoff was worth it
-
-I did 8 bit on these because these models are small enough to handle 8 bit quantization
-
-## tokenizer
-
-so you have to be careful with tokenizer, this is what defines the how your model will adapt with your prompts
-
-for example llama tokenizer will not work with qwen model
-here is some sample how it looks like
-
-```python
- """ 
-<|begin_of_text|>
-
-<|start_header_id|>system<|end_header_id|>
-
-Cutting Knowledge Date: December 2023
-Today Date: 09 Feb 2026
-
-You are Prasanna's AI Assistant. You answer questions about his professional background, projects, and skills.
-<|eot_id|>
-
-<|start_header_id|>user<|end_header_id|>Who is Prasanna?<|eot_id|>
-
-<|start_header_id|>assistant<|end_header_id|>
-Prasanna is a software engineer with over 3 years of experience specializing in Machine Learning, Python, and Linux systems.
-<|eot_id|>
-"""
-
-```
-
-## final decision
-
-I choosed smoll-vllm-360M-instruct model because it was 60% accuracy and 350MB size
-
-why llama.cpp & unsloth
-
-llama.cpp is a C++ implementation of LLaMA inference engine
-it is very fast and efficient and can run on CPU
-
-can simply run on any device with just sigle file
-example:
-
-```bash
-llama-server -m ./model.gguf \
---port 8080 \
---ctx-size 4096
-```
-
-just simple as that and unsloth supports converting the LORA or QLora adapters to GGUF format which is way easier than I thought
-
-```python
-model.save_pretrained_gguf(
-    model_path,
-    tokenizer,
-    quantization_method = "q4_k_m"
-)   
-```
-
-both llama.cpp & unsloth supports hugginfgface transformers which is cherry on top -->
-
 # Building a Personal LLM: My Journey, Trade-offs, and Final Choice
 
 I’ve started thinking: okay, it’s about time I pre-train or fine-tune a model from scratch about *me*—my journey, my story, and my life.  
@@ -264,3 +137,20 @@ Prasanna is a software engineer with over 3 years of experience specializing in 
 ```
 
 ## Optimization
+
+waht is LORA adapter ?
+
+Low rank adaption which help us avoid overtraining the whole weights 
+in pretrained model
+
+say d = 4096, 
+we define rank & alpha 
+
+first we freeze the model then we initialize all Linear weights based on d x rank 
+
+* A = matrix^d * rank , B = matrix^rank * d
+* then we scale by alpha / rank 
+
+
+self.lora_A = nn.Linear(base.in_features, r, bias=False, device=device, dtype=dtype)
+self.lora_B = nn.Linear(r, base.out_features, bias=False, device=device, dtype=dtype)

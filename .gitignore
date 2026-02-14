@@ -16,3 +16,6 @@ unsloth_compiled_cache/
 qwen-7b-full/
 outputs/
 *.cpp
+*.safetensors
+*.jinja
+src/models/my-model/smollLLM-sft-adapters/README.md

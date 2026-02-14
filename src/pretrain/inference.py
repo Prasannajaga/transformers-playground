@@ -132,7 +132,7 @@ class InferenceEngine:
 
             idx = torch.cat([idx, next_token], dim=1)
 
-        return self.tokenizer.decode(idx[0], skip_special_tokens=True)
+        return self.tokenizer.decode(idx[0], skip_special_tokens=False)
 
     def infer_chat(self, messages: list[dict], streamText: bool = False):
         model_inputs = self._prepare_chat_inputs(messages)

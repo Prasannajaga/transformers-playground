@@ -53,6 +53,30 @@ def _config_to_dict(config: Any) -> dict[str, Any]:
     return out
 
 
+def resolve_dtype() -> str:
+    if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+        return "bfloat16"
+    if torch.cuda.is_available():
+        return "float16"
+    return "float32"
+
+
+def build_causal_lm_collate_fn(pad_token_id: int):
+    def collate_fn(samples: list[dict[str, Any]]) -> tuple[torch.Tensor, torch.Tensor]:
+        input_ids = [torch.tensor(sample["input_ids"], dtype=torch.long) for sample in samples]
+        attention_mask = [
+            torch.tensor(sample.get("attention_mask", [1] * len(sample["input_ids"])), dtype=torch.long)
+            for sample in samples
+        ]
+        input_ids = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True, padding_value=pad_token_id)
+        attention_mask = torch.nn.utils.rnn.pad_sequence(attention_mask, batch_first=True, padding_value=0)
+        labels = input_ids.clone()
+        labels[attention_mask == 0] = -100
+        return input_ids, labels
+
+    return collate_fn
+
+
 def get_lr(it: int, config: Any) -> float:
     """
     Cosine learning rate schedule with linear warmup.
@@ -98,8 +122,16 @@ def _unpack_batch(batch: Any) -> tuple[Any, Any]:
             return batch[0], batch[0]
         return batch[0], batch[1]
     if isinstance(batch, dict):
-        inp = batch.get("input_ids") or batch.get("inputs") or batch.get("input")
-        tgt = batch.get("labels") or batch.get("targets") or batch.get("target_ids")
+        inp = None
+        for key in ("input_ids", "inputs", "input"):
+            if key in batch and batch[key] is not None:
+                inp = batch[key]
+                break
+        tgt = None
+        for key in ("labels", "targets", "target_ids"):
+            if key in batch and batch[key] is not None:
+                tgt = batch[key]
+                break
         if inp is None:
             raise ValueError("Dict batch missing input_ids/inputs key")
         if tgt is None:
