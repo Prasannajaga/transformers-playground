@@ -15,6 +15,7 @@ from transformers import (
     TrainingArguments,
     Trainer,
 )
+from unsloth import FastLanguageModel
 from transformers.trainer_utils import TrainOutput
 
 
@@ -58,7 +59,7 @@ class UnslothWrapper:
         if "processing_class" in params:
             trainer_kwargs["processing_class"] = tokenizer
         else:
-            trainer_kwargs["tokenizer"] = tokenizer
+            trainer_kwargs["tokenizer"] = tokenizer 
 
     @classmethod
     def load_model_and_tokenizer(
@@ -341,15 +342,40 @@ class UnslothWrapper:
     def save_pretrained_gguf(
         *,
         model: PreTrainedModel,
-        save_directory: str | Path,
         tokenizer: PreTrainedTokenizerBase,
-        quantization_method: str = "q4_k_m",
+        model_name: str,
+        base_directory: str = "gguf-models",
+        quantization_method: str | list[str] = "q4_k_m",
+        **kwargs: Any,
     ) -> None:
-        model.save_pretrained_gguf(
-            str(Path(save_directory)),
-            tokenizer,
-            quantization_method=quantization_method,
-        )
+        """Save model in GGUF format with specified quantization.
+
+        Args: 
+            quantization_method: Single method or list of methods. Options:
+                - "f32": Full precision
+                - "f16": Half precision  
+                - "q8_0": 8-bit quantization
+                - "q6_k": 6-bit quantization
+                - "q5_k_m": 5-bit medium quantization
+                - "q5_k_s": 5-bit small quantization
+                - "q4_k_m": 4-bit medium quantization (default, recommended)
+                - "q4_k_s": 4-bit small quantization
+                - "q3_k_m": 3-bit medium quantization
+                - "q3_k_s": 3-bit small quantization
+                - "q2_k": 2-bit quantization 
+        """
+        save_dir = str(Path(base_directory) / model_name)
+        
+        if isinstance(quantization_method, str):
+            quantization_method = [quantization_method]
+        
+        for quant in quantization_method:
+            model.save_pretrained_gguf(
+                save_dir,
+                tokenizer,
+                quantization_method=quant,
+                **kwargs,
+            )
 
     @staticmethod
     def save_pretrained_merged(
@@ -384,3 +410,5 @@ class UnslothWrapper:
             tokenizer,
             **save_kwargs,
         )
+
+

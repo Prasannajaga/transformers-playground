@@ -1,11 +1,15 @@
 from __future__ import annotations
+import os
 from pathlib import Path
 from typing import Any
 import threading
 
 import torch
-from huggingface_hub import snapshot_download
+from huggingface_hub import HfApi, snapshot_download
 from datasets import load_dataset
+
+_HF_TOKEN_ENV_VARS: tuple[str, ...] = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")
+_VALID_REPO_TYPES: tuple[str, ...] = ("model", "dataset", "space")
 from transformers import (
     AutoModel,
     AutoModelForCausalLM,
@@ -217,6 +221,80 @@ class HFWrapper:
         if tokenizer is not None:
             tokenizer.save_pretrained(output_dir)
         return output_dir
+
+    @classmethod
+    def _resolve_hf_token(cls, token: str | None = None) -> str | None:
+        """Resolve HF token from explicit arg, environment, or cached credentials."""
+        if token is not None:
+            return token
+        for env_var in _HF_TOKEN_ENV_VARS:
+            env_val = os.environ.get(env_var)
+            if env_val:
+                return env_val
+        return None
+
+    @classmethod
+    def push_file(
+        cls,
+        *,
+        file_path: str | Path,
+        repo_id: str,
+        path_in_repo: str | None = None,
+        repo_type: str = "model",
+        revision: str = "main",
+        commit_message: str | None = None,
+        private: bool = False,
+        token: str | None = None,
+    ) -> str:
+        """Upload a single file to a HuggingFace Hub repository.
+
+        Creates the repository if it does not already exist.
+
+        Returns:
+            The URL of the uploaded file on the Hub.
+        """
+        resolved_path = Path(file_path).resolve()
+        if not resolved_path.is_file():
+            raise FileNotFoundError(f"File not found: {resolved_path}")
+
+        if repo_type not in _VALID_REPO_TYPES:
+            raise ValueError(
+                f"Invalid repo_type '{repo_type}'. Must be one of: {_VALID_REPO_TYPES}"
+            )
+
+        resolved_token = cls._resolve_hf_token(token)
+        api = HfApi(token=resolved_token)
+
+        # Verify credentials before any mutation
+        try:
+            api.whoami()
+        except Exception as exc:
+            raise RuntimeError(
+                "HuggingFace authentication required. Either:\n"
+                "  1. Run: huggingface-cli login\n"
+                f"  2. Set one of {_HF_TOKEN_ENV_VARS} environment variables\n"
+                "  3. Pass token= argument"
+            ) from exc
+
+        api.create_repo(
+            repo_id=repo_id,
+            repo_type=repo_type,
+            private=private,
+            exist_ok=True,
+        )
+
+        destination = path_in_repo or resolved_path.name
+        message = commit_message or f"Upload {destination}"
+
+        url: str = api.upload_file(
+            path_or_fileobj=str(resolved_path),
+            path_in_repo=destination,
+            repo_id=repo_id,
+            repo_type=repo_type,
+            revision=revision,
+            commit_message=message,
+        )
+        return url
 
     @classmethod
     def load_model_and_tokenizer(
