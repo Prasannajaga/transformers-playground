@@ -19,3 +19,9 @@ outputs/
 *.safetensors
 *.jinja
 src/models/my-model/smollLLM-sft-adapters/README.md
+*.gguf
+main.log
+llama.log
+datasets/merge_datasets.py
+datasets/generate_prasanna_dataset.py
+Prasanna-SmolLM-360M-3.1/readme.md

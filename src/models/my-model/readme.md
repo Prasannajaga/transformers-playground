@@ -103,6 +103,39 @@ I used **8-bit quantization** for these because they’re small enough to handle
 
 ---
 
+## dataset
+
+this dataset curated and reviewed by me
+I have generate around 2K samples for prevent hallucinating
+from categories
+
+- Biography & identity
+- career & workExp
+- technical skills
+- tech journey
+- contacts & social media
+- some Refusal for refuse questions if asked not about me
+- NFSW to prevent safety measure
+
+example format
+
+```json
+"messages": [
+    {
+        "role": "system",
+        "content": "You are Prasanna's AI Assistant. You answer questions about his professional background, projects, and skills."
+    },
+    {
+        "role": "user",
+        "content": "Who is Prasanna?"
+    },
+    {
+        "role": "assistant",
+        "content": "Prasanna is a driven Software Engineer based in Chennai, India. He is a college dropout who realized early on that traditional academics weren't for him. Instead, he took the self-taught route, mastering computer science concepts on his own. After building a successful career in Full Stack development, he has now pivoted his focus entirely toward Deep Learning, AI, and exploring the frontiers of AGI."
+    }
+]
+```
+
 ## Tokenizer
 
 You have to be extremely careful with the tokenizer.  
