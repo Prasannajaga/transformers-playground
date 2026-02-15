@@ -118,6 +118,15 @@ python src/scripts/hf-old-conversion.py \
   --attention MQA
 ```
 
+## Trained Models
+
+you can find a model I trained from this playground below and their HuggingFace links:
+
+| Model                | README                                     | HuggingFace |
+|----------------------|--------------------------------------------|-------------|
+| my-model             | [readme](src/models/my-model/readme.md)    |      [link](https://huggingface.co/prasannaJagadesh/my-model)       |
+| mini-stories         | [readme](src/models/tiny-stories/readme.md)|      [link](https://huggingface.co/prasannaJagadesh/my-mini-stories)       |
+
 ## Project Structure
 
 ```text
