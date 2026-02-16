@@ -1,6 +1,28 @@
 # transformers-playground
+A custom transformer model training and deployment toolkit built for rapid experimentation, efficient fine-tuning, and seamless deployment to Hugging Face Hub.
 
-Custom transformer model training and deployment toolkit for building, training, and deploying language models to HuggingFace Hub.
+This repository is centered around one principle:
+
+> Experiment → Fail → Optimize → Repeat
+
+It provides a streamlined wrapper layer on top of modern LLM tooling to accelerate training speed, simplify inference, and reduce engineering overhead during iteration.
+## Trained Models
+
+you can find a model I trained from this playground below and their HuggingFace links:
+
+| Model                | README                                     | HuggingFace |
+|----------------------|--------------------------------------------|-------------|
+| my-model             | [readme](src/models/my-model/readme.md)    |      [link](https://huggingface.co/prasannaJagadesh/my-model)       |
+| mini-stories         | [readme](src/models/tiny-stories/readme.md)|      [link](https://huggingface.co/prasannaJagadesh/my-mini-stories)       |
+
+
+This project was built to:
+
+- Maximize LLM training throughput
+- Reduce friction in experimentation cycles
+- Standardize model training and evaluation workflows
+- Simplify inference and deployment pipelines
+- Improve reproducibility across experiments
 
 ## CLI Scripts
 
@@ -67,15 +89,6 @@ python src/scripts/hf-old-conversion.py \
   --n_embd 768 \
   --attention MQA
 ```
-
-## Trained Models
-
-you can find a model I trained from this playground below and their HuggingFace links:
-
-| Model                | README                                     | HuggingFace |
-|----------------------|--------------------------------------------|-------------|
-| my-model             | [readme](src/models/my-model/readme.md)    |      [link](https://huggingface.co/prasannaJagadesh/my-model)       |
-| mini-stories         | [readme](src/models/tiny-stories/readme.md)|      [link](https://huggingface.co/prasannaJagadesh/my-mini-stories)       |
 
 ## Project Structure
 
