@@ -9,7 +9,7 @@ So I thought, okay, let me fine tune a model instead.
 
 Choosing the right model to fine tune turned out to be harder than I expected.
 
-you can find the full progress [here](src/models/my-model/progress.md)
+you can find the full progress [here](progress.md)
 
 ## dataset
 

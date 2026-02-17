@@ -1,6 +1,29 @@
 # transformers-playground
 
-Custom transformer model training and deployment toolkit for building, training, and deploying language models to HuggingFace Hub.
+A custom transformer model training and deployment toolkit built for rapid experimentation, efficient fine-tuning, and seamless deployment to Hugging Face Hub.
+
+This repository is centered around one principle:
+
+> Experiment → Fail → Optimize → Repeat
+
+It provides a streamlined wrapper layer on top of modern LLM tooling to accelerate training speed, simplify inference, and reduce engineering overhead during iteration.
+
+## Trained Models
+
+you can find a model I trained from this playground below and their HuggingFace links:
+
+| Model                | README                                     | HuggingFace |
+|----------------------|--------------------------------------------|-------------|
+| my-model             | [readme](src/models/my-model/readme.md)    |      [link](https://huggingface.co/prasannaJagadesh/my-model)       |
+| mini-stories         | [readme](src/models/tiny-stories/readme.md)|      [link](https://huggingface.co/prasannaJagadesh/my-mini-stories)       |
+
+This project was built to:
+
+- Maximize LLM training throughput
+- Reduce friction in experimentation cycles
+- Standardize model training and evaluation workflows
+- Simplify inference and deployment pipelines
+- Improve reproducibility across experiments
 
 ## CLI Scripts
 
@@ -50,14 +73,23 @@ python src/scripts/dataset-deploy.py \
   --preserve-card
 ```
 
-## Trained Models
+### Legacy Checkpoint Conversion
 
-you can find a model I trained from this playground below and their HuggingFace links:
+Convert old checkpoint formats to HuggingFace:
 
-| Model                | README                                     | HuggingFace |
-|----------------------|--------------------------------------------|-------------|
-| my-model             | [readme](src/models/my-model/readme.md)    |      [link](https://huggingface.co/prasannaJagadesh/my-model)       |
-| mini-stories         | [readme](src/models/tiny-stories/readme.md)|      [link](https://huggingface.co/prasannaJagadesh/my-mini-stories)       |
+```bash
+python src/scripts/hf-old-conversion.py \
+  --model_path <model-path> \
+  --repo_id username/converted-model \
+  --config_path <config-path>
+ 
+python src/scripts/hf-old-conversion.py \
+  --model_path <model-path> \
+  --repo_id username/converted-model \
+  --n_layer 12 \
+  --n_embd 768 \
+  --attention MQA
+```
 
 ## Project Structure
 
