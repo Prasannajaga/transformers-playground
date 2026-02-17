@@ -50,24 +50,6 @@ python src/scripts/dataset-deploy.py \
   --preserve-card
 ```
 
-### Legacy Checkpoint Conversion
-
-Convert old checkpoint formats to HuggingFace:
-
-```bash
-python src/scripts/hf-old-conversion.py \
-  --model_path <model-path> \
-  --repo_id username/converted-model \
-  --config_path <config-path>
- 
-python src/scripts/hf-old-conversion.py \
-  --model_path <model-path> \
-  --repo_id username/converted-model \
-  --n_layer 12 \
-  --n_embd 768 \
-  --attention MQA
-```
-
 ## Trained Models
 
 you can find a model I trained from this playground below and their HuggingFace links:

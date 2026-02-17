@@ -6,8 +6,8 @@ import json
 
 OUTPUT_PATH = "./datasets/prasanna_data.json"
 MODEL_NAME = "HuggingFaceTB/SmolLM2-360M-Instruct"
-NEW_MODEL_NAME = "Prasanna-SmolLM-360M-3.1"
-MAX_SEQ_LENGTH = 1024 
+NEW_MODEL_NAME = "Prasanna-SmolLM-360M-3.2"
+MAX_SEQ_LENGTH = 2048 
 
 print(f"Loading {MODEL_NAME}...")
 model, tokenizer = UnslothWrapper.load_model_and_tokenizer(
@@ -23,9 +23,9 @@ bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
 # standard config 
 model = UnslothWrapper.get_peft_model(
     model=model,
-    r=16,                
-    lora_alpha=32,      
-    lora_dropout=0.05,  
+    r=32,                
+    lora_alpha=64,      
+    lora_dropout=0.02,  
     bias="none",
     use_gradient_checkpointing="unsloth",
 )
@@ -35,7 +35,7 @@ TRAIN_ARGS = {
     "gradient_accumulation_steps": 2, 
     "warmup_steps": 20,       
     "num_train_epochs": 3,    
-    "learning_rate": 2e-4,    
+    "learning_rate": 3e-4,    
     "weight_decay": 0.01,
     "lr_scheduler_type": "cosine",
     "optim": "adamw_8bit",    
@@ -134,7 +134,7 @@ UnslothWrapper.save_pretrained_gguf(
     model=model,
     tokenizer=tokenizer,
     model_name=NEW_MODEL_NAME,  
-    quantization_method=["q8_0" , "f16"]
+    quantization_method=["q8_0" , "q5_k_m", "q4_k_s"]
 )
 print(f"GGUF models saved to gguf-models/{NEW_MODEL_NAME}/")
 

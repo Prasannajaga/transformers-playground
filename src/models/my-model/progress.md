@@ -1,0 +1,106 @@
+# Progress Update
+
+So my goal isto deploy it in either Cloud Run or Compute Engine to handle inference for my portfolio. I found the optimal solution for this:
+
+- **Wllama**: For browser-based inference.
+- **Fine-tuning**: Fine-tune the model.
+- **Hugging Face**: Push as `.gguf` (llama-compatible, 8-bit quantization).
+- **Direct Load**: Load in browser via `wllama.loadFromHF()`.
+
+This approach allows for faster iteration compared to GCP deployment in many ways.
+
+## Current Status
+
+As of now, the fine-tuned model is already deployed on my website. I'm currently working on Reinforcement Learning to prevent hallucinations or any false information.
+
+## My Goal Clear
+
+I want to create a chatbot **about me** and deploy it on my portfolio.  
+That comes with some hard constraints:
+
+1. The model should infer smoothly on **CPU**
+2. Model size should be **less than 300 MB**
+3. Small enough to fit into **4 GB / 8 GB RAM**
+4. Quantized and able to infer using **llama.cpp**
+5. Deployed on **Cloud Run**, cost-effective (I’ve got GCP credits)
+6. Freeze the base model and use **Unsloth** for LoRA fine-tuning
+
+---
+
+## Choosing the Model
+
+I was very confused about which model to choose.  
+I decided to go with **instruction-tuned models**, since they’re not only pre-trained on massive datasets but also fine-tuned for instruction following.
+
+I narrowed it down to three options:
+
+1. `llama-3.1-8b-instruct`
+2. `qwen2.5-0.5b-instruct`
+3. `smoll-vllm-135M / 360M-instruct`
+
+---
+
+## llama-3.1-8b-instruct
+
+I always wanted to work with LLaMA, so this was my first fine-tuning experiment.
+
+No doubt—it’s a SOTA model. Even with just a few samples, I could reach very high accuracy.
+
+But reality hit hard.
+
+- Model size: **2.47 GB → ~800 MB (4-bit quantized)**
+- Accuracy: **~95% with just 10 samples**
+- Problem: **Infra cost**
+
+Deploying this on Cloud Functions or Cloud Run would be expensive, especially considering cold starts where the model needs to be loaded on every request.
+
+It was a hard trade-off, but I had to drop LLaMA because of infrastructure constraints.
+
+**Summary**
+
+- 2.47 GB → 800 MB (4-bit)
+- ~100% better accuracy
+- Too expensive for my use case
+
+---
+
+## qwen2.5-0.5b-instruct
+
+This is a 500 M parameter model.
+
+I thought, okay—this could be the sweet spot.
+
+- Quantized size: **~1 GB → 390 MB (4-bit)**
+- Accuracy: **~75% with just 10 samples**
+
+The model is trained on fewer tokens compared to LLaMA, which shows up in performance.
+
+**Summary**
+
+- 1 GB → 390 MB (4-bit)
+- ~60% lower accuracy compared to LLaMA
+- Still slightly too large for my comfort
+
+---
+
+## smoll-vllm-135M / 360M-instruct
+
+Finally—models that actually fit my requirements.
+
+### 🔹 135M Model
+
+- Size: **270 MB → 144 MB (8-bit)**
+- Accuracy: **~40%**
+
+Not great accuracy, but the trade-off was acceptable given the size.
+
+### 🔹 360M Model
+
+- Size: **725 MB → 350 MB (8-bit)**
+- Accuracy: **~60%**
+
+This felt like the best balance between size, performance, and cost.
+
+I used **8-bit quantization** for these because they’re small enough to handle it without massive degradation.
+
+---
