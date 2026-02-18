@@ -18,4 +18,10 @@
 
 - NO boilerplate code.
 - NO placeholder comments.
+- MINIMAL docstrings
 - NO automated testing logic.
+
+## Important
+
+should right code wihtout consumeing full memory
+should be efficient memory handling
