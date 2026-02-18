@@ -1,5 +1,6 @@
 from config import TrainingConfig
 import threading
+import time
 from typing import Optional, Any
 
 import torch
@@ -94,6 +95,7 @@ class InferenceEngine:
             next_token_logits = logits[:, -1, :]
             next_token = self._sample_next_token(next_token_logits, idx)
 
+            # no need to genreate if it's end of token 
             if (
                 self.cfg.stop_on_eos
                 and next_token.item() == self.tokenizer.eos_token_id
@@ -124,6 +126,7 @@ class InferenceEngine:
             next_token_logits = logits[:, -1, :]
             next_token = self._sample_next_token(next_token_logits, idx)
 
+            # no need of generation if it reached the end of token 
             if (
                 self.cfg.stop_on_eos
                 and next_token.item() == self.tokenizer.eos_token_id
@@ -134,7 +137,87 @@ class InferenceEngine:
 
         return self.tokenizer.decode(idx[0], skip_special_tokens=False)
 
-    def infer_chat(self, messages: list[dict], streamText: bool = False):
+    def speculative_decoding(
+        self,
+        model_inputs: dict[str, torch.Tensor],
+        draft_model: nn.Module,
+        stream: bool = False,
+    ) -> tuple[str, float]:
+        """
+        Draft-assisted speculative decoding.
+
+        The draft model proposes candidate tokens cheaply; the target model
+        verifies them in a single forward pass via HuggingFace's
+        `assistant_model` argument.  A background thread drives generation
+        so the main thread can consume the TextIteratorStreamer.
+
+        Returns:
+            (decoded_text, tokens_per_second)
+        """
+        if not hasattr(self.model, "generate"):
+            raise RuntimeError(
+                "speculative_decoding requires a HuggingFace model with a .generate() method."
+            )
+        if self.tokenizer is None:
+            raise ValueError("Tokenizer is required for speculative decoding.")
+
+        streamer = TextIteratorStreamer(
+            self.tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=True,
+        )
+
+        generation_kwargs: dict[str, Any] = {
+            **model_inputs,
+            **self._build_generation_kwargs(),
+            "assistant_model": draft_model,
+            "streamer": streamer,
+        }
+
+        thread_results: dict[str, Any] = {}
+
+        def _generate() -> None:
+            with torch.no_grad():
+                thread_results["outputs"] = self.model.generate(**generation_kwargs)
+
+        start_time = time.perf_counter()
+
+        worker = threading.Thread(target=_generate, daemon=True)
+        worker.start()
+
+        collected_tokens: list[str] = []
+        for token_text in streamer:
+            collected_tokens.append(token_text)
+            if stream:
+                print(token_text, end="", flush=True)
+
+        worker.join()
+        elapsed = time.perf_counter() - start_time
+
+        outputs = thread_results["outputs"]
+        input_len = model_inputs["input_ids"].shape[-1]
+        num_generated = outputs.shape[-1] - input_len
+        tokens_per_second = num_generated / elapsed if elapsed > 0 else 0.0
+
+        decoded = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        return decoded, tokens_per_second
+
+    def infer_chat(
+        self,
+        messages: list[dict],
+        streamText: bool = False,
+        speculative: bool = False,
+        draft_model: Optional[nn.Module] = None,
+    ) -> Any: 
+
+        if speculative:
+            if draft_model is None:
+                raise ValueError(
+                    "draft_model must be provided when speculative=True."
+                )
+            model_inputs = self._prepare_chat_inputs(messages)
+            return self.speculative_decoding(model_inputs, draft_model, stream=streamText)
+
         model_inputs = self._prepare_chat_inputs(messages)
         if streamText:
             return self._stream_chat(model_inputs)

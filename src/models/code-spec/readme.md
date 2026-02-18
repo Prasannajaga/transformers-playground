@@ -30,3 +30,19 @@ this help us distrubute the GPU compute equally rather than wasting utilization 
 
 before returning the response target model perform acceptance rate
 to the prev generated tokens
+
+
+## Results
+
+by adding speculative I can able to increase 4 tokens faster 
+
+Standard single pass decoding:
+
+⚡ Speed: 44.99 tokens/second
+
+
+with Sepculative:
+
+prompt : write me simple transformer in torch
+⚡ Speed: 49.07 tokens/second
+

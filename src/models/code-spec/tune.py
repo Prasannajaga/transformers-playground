@@ -34,7 +34,7 @@ draft_model = AutoModelForCausalLM.from_pretrained(
 print("✅ Models loaded. Starting Inference...")
 
 # --- Inference Function ---
-def generate_code_speculative(prompt, max_new_tokens=200):
+def generate_code_speculative(prompt, max_new_tokens=1024, sepculative=True):
     inputs = tokenizer(prompt, return_tensors="pt").to(DEVICE)
     streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
     
@@ -43,10 +43,10 @@ def generate_code_speculative(prompt, max_new_tokens=200):
     
     generation_kwargs = dict(
         inputs,
-        assistant_model=draft_model,
+        assistant_model=draft_model if sepculative else None,
         max_new_tokens=max_new_tokens,
         do_sample=False,
-        # temperature=0.0,
+        temperature=0.7,
         pad_token_id=tokenizer.eos_token_id,
         streamer=streamer,
     )
@@ -85,7 +85,7 @@ while True:
         continue
 
     print("-" * 40)
-    result, tps = generate_code_speculative(prompt_text)
+    result, tps = generate_code_speculative(prompt_text, sepculative=True)
 
     print(f"\n{result}")
     print("-" * 40)
