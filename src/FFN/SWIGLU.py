@@ -27,9 +27,9 @@ config = Config()
 class SWIGLU_FFN(nn.Module):
     """SwiGLU Feed-Forward Network (used in LLaMA-style models)"""
 
-    def __init__(self, n_embd):
+    def __init__(self, n_embd, expansion_ratio=4.0):
         super().__init__()
-        hidden_dim = 4 * n_embd
+        hidden_dim = int(expansion_ratio * n_embd)
 
         self.w1 = nn.Linear(n_embd, hidden_dim)
         self.w2 = nn.Linear(n_embd, hidden_dim)

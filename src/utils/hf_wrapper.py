@@ -127,7 +127,9 @@ class HFWrapper:
         if local_dir is None:
             return name
         local_path = Path(local_dir)
-        if prefer_local and local_path.exists():
+        if prefer_local:
+            if not local_path.exists():
+                raise FileNotFoundError(f"Local path not found: {local_path}")
             return str(local_path)
         return name
 

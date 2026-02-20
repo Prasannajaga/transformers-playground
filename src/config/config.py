@@ -204,3 +204,18 @@ class FineTuneConfig:
 
     # Base checkpoint (MID-TRAINED!)
     pretrained_checkpoint = "./finetuned/midtrain/midtrain_final_0002000.pt"
+
+
+@dataclass(frozen=True)
+class PruneConfig:
+    model_id: str = "meta-llama/Llama-3.2-1B-Instruct"
+    dtype: torch.dtype = torch.bfloat16
+    prune_ratio: float = 0.30
+    output_dir: str = "./pruned_output"
+    save_tokenizer: bool = True
+
+    def __post_init__(self) -> None:
+        if not (0.0 < self.prune_ratio < 1.0):
+            raise ValueError(f"prune_ratio must be in (0, 1), got {self.prune_ratio}")
+        if not self.model_id:
+            raise ValueError("model_id must not be empty")
