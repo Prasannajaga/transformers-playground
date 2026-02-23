@@ -3,7 +3,7 @@ import time
 import torch
 from transformers import TextStreamer
 
-from utils import UnslothWrapper
+from utils.unsloth_wrapper import UnslothWrapper
 
 MODEL_NAME = "Prasanna-SmolLM-360M-3.3"
 MAX_SEQ_LENGTH = 1024
