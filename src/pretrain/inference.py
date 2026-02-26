@@ -1,4 +1,4 @@
-from config import TrainingConfig
+from src.config import TrainingConfig
 import threading
 import time
 from typing import Optional, Any
@@ -256,7 +256,7 @@ class InferenceEngine:
         data = torch.load(path, map_location=self.device)
         self.model.load_state_dict(data["model_state_dict"], strict=True)
         if "config" in data and data["config"]:
-            from config.config import TrainingConfig
+            from src.config.config import TrainingConfig
             self.cfg = TrainingConfig(**data["config"])
             self.autocast_dtype = (
                 torch.bfloat16

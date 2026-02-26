@@ -18,7 +18,7 @@ import torch
 from torch import nn
 from torch.optim import AdamW
 from tqdm import tqdm
-from config.config import TrainingConfig
+from src.config.config import TrainingConfig
 
 SUPPORTED_OPTIMIZERS = frozenset({"adamw", "adam", "sgd", "adafactor"})
 LOGS_DIR = "src/logs" 
