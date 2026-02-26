@@ -21,7 +21,6 @@ from tqdm import tqdm
 from src.config.config import TrainingConfig
 
 SUPPORTED_OPTIMIZERS = frozenset({"adamw", "adam", "sgd", "adafactor"})
-LOGS_DIR = "src/logs" 
 
 class Trainer:
 
@@ -32,15 +31,27 @@ class Trainer:
         device: torch.device,
         tokenizer: Optional[Any] = None,
         ckpt_dir: Optional[str] = None,
+        prompts: Optional[list[str]] = None,
     ):
         self.model = model
         self.config = config
         self.device = device if isinstance(device, torch.device) else torch.device(device)
         self.tokenizer = tokenizer
+        self.prompts = list(prompts or [])
         # checkpoint directory precedence: explicit arg > config.ckpt_dir
         self.ckpt_dir = ckpt_dir or config.ckpt_dir
+        self.logs_dir: Optional[str] = None
+        self.metrics_dir: Optional[str] = None
+        self.log_file_path: Optional[str] = None
         if self.ckpt_dir:
             os.makedirs(self.ckpt_dir, exist_ok=True)
+            self.logs_dir = os.path.join(self.ckpt_dir, "logs")
+            os.makedirs(self.logs_dir, exist_ok=True)
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            self.log_file_path = os.path.join(self.logs_dir, f"trainer_{timestamp}.log")
+            if len(self.prompts) > 0:
+                self.metrics_dir = os.path.join(self.ckpt_dir, "metrics")
+                os.makedirs(self.metrics_dir, exist_ok=True)
 
         # device placement
         self.model.to(self.device)
@@ -100,6 +111,12 @@ class Trainer:
     def _log(self, message: str):
         if self.config.enable_logging:
             tqdm.write(message, file=sys.stderr)
+            if self.log_file_path:
+                try:
+                    with open(self.log_file_path, "a", encoding="utf-8") as fp:
+                        fp.write(f"{datetime.now().isoformat()} | {message}\n")
+                except Exception:
+                    pass
     
     def _log_init_info(self):
         params = self.parameter_counts()
@@ -343,8 +360,10 @@ class Trainer:
             raise
 
     def _save_checkpoint_metadata(self, checkpoint_path: str, checkpoint_name: str):
+        if not self.metrics_dir:
+            return
         base_name = os.path.splitext(checkpoint_name)[0]
-        metadata_path = os.path.join(LOGS_DIR, f"{base_name}.json")
+        metadata_path = os.path.join(self.metrics_dir, f"{base_name}.json")
         try:
             metadata = self._generate_training_metadata(checkpoint_path)
             self._save_metadata_atomically(metadata, metadata_path)
@@ -356,34 +375,31 @@ class Trainer:
         step = self.global_step if step is None else int(step)
         if not self.ckpt_dir:
             raise ValueError("Checkpoint directory not configured.")
-        
-        # Create prefix subdirectory: ckpt_dir/prefix/
-        prefix_dir = os.path.join(self.ckpt_dir, prefix)
-        os.makedirs(prefix_dir, exist_ok=True)
+        os.makedirs(self.ckpt_dir, exist_ok=True)
         
         # Save config.json once (only if it doesn't exist)
-        config_path = os.path.join(prefix_dir, "config.json")
+        config_path = os.path.join(self.ckpt_dir, "config.json")
         if not os.path.exists(config_path):
             config_data = asdict(self.config)
             with open(config_path, "w") as f:
                 json.dump(config_data, f, indent=2)
             self._log(f"[Trainer] Saved config: {config_path}")
         
-        # Save checkpoint: prefix/prefix_{step}.pt
+        # Save checkpoint file in checkpoint root directory.
         fname = f"{prefix}_{step}.pt"
-        path = os.path.join(prefix_dir, fname)
+        path = os.path.join(self.ckpt_dir, fname)
         payload = {
             "model_state_dict": self.model.state_dict(),
             "training_step": step,
         }
 
-        # Save tokenizer once (only if directory doesn't exist)
+        # Save tokenizer files once in checkpoint root.
         if self.tokenizer is not None:
-            tokenizer_dir = os.path.join(prefix_dir, "tokenizer")
-            if not os.path.exists(tokenizer_dir):
+            tokenizer_json_path = os.path.join(self.ckpt_dir, "tokenizer.json")
+            if not os.path.exists(tokenizer_json_path):
                 try:
-                    self.tokenizer.save_pretrained(tokenizer_dir)
-                    self._log(f"[Trainer] Saved tokenizer: {tokenizer_dir}")
+                    self.tokenizer.save_pretrained(self.ckpt_dir)
+                    self._log(f"[Trainer] Saved tokenizer files: {self.ckpt_dir}")
                 except Exception as e:
                     self._log(f"[Trainer] Warning: Failed to save tokenizer: {e}")
 
@@ -677,9 +693,8 @@ class Trainer:
         )
         if self.ckpt_dir and not already_saved:
             try:
-                ckpt_name = f"final_ckpt_step_{self.global_step:07d}.pt"
                 ckpt_path = self.save_checkpoint(step=self.global_step, prefix="final_ckpt")
-                self._save_checkpoint_metadata(ckpt_path, ckpt_name)
+                self._save_checkpoint_metadata(ckpt_path, os.path.basename(ckpt_path))
             except Exception as e:
                 self._log(f"[Trainer] Warning: Final checkpoint save failed: {e}")
  
